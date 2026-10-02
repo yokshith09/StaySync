@@ -39,6 +39,20 @@ test("an approved simulated payment confirms its held reservation and requests c
   assert.equal(logs.at(-1).event, "confirmation_requested");
 });
 
+test("the payment failure scenario returns a 502 and an ERROR log without confirming the booking", async () => {
+  const logs = [];
+  const app = createStaySyncApp({ writeLog: (entry) => logs.push(entry) });
+  const hold = await app.fetch(new Request("http://localhost/api/reservations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ roomId: "room-city-twin", checkIn: "2026-12-23", checkOut: "2026-12-25", guestCount: 2 }) }));
+  const { reservation } = await hold.json();
+  const response = await app.fetch(new Request("http://localhost/api/payments", { method: "POST", headers: { "content-type": "application/json", "x-demo-scenario": "payment_failure" }, body: JSON.stringify({ reservationId: reservation.id }) }));
+
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error.code, "PAYMENT_PROVIDER_REJECTED");
+  assert.equal(logs.at(-1).event, "payment_provider_rejected");
+  assert.equal(logs.at(-1).severity, "ERROR");
+  assert.equal(logs.at(-1).statusCode, 502);
+});
+
 test("staff can check in a confirmed reservation", async () => {
   const app = createStaySyncApp();
   const hold = await app.fetch(new Request("http://localhost/api/reservations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ roomId: "room-garden-suite", checkIn: "2026-12-19", checkOut: "2026-12-21", guestCount: 2 }) }));
