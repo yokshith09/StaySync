@@ -85,11 +85,14 @@ Search rooms → Hold a room → Choose simulated payment outcome
 ### Current API surface
 
 - `GET /health`
+- `POST /api/auth/register`
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
 - `GET /api/rooms?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD&guests=number`
+- `GET /api/rooms/all` (protected: staff role required)
 - `POST /api/reservations`
+- `POST /api/reservations/:id/cancel` (protected: guest owner or staff role)
 - `POST /api/payments`
 - `GET /api/reservations` (protected: staff role required)
 - `GET /api/reservations/my` (protected: active session required)
@@ -110,6 +113,8 @@ All error responses use this shape:
 | Normal room search | Guest search | `200` | `room_search_completed` | `INFO` |
 | Reservation hold | Select room | `201` | `reservation_held` | `INFO` |
 | Overlap conflict | Hold same room/dates twice | `409` | `reservation_conflict` | `WARNING` |
+| Cleaning lock | Hold room currently under cleaning | `409` | `room_unavailable_cleaning` | `WARNING` |
+| Reservation cancellation | Guest/staff cancels booking | `200` | `reservation_cancelled` | `INFO` |
 | Invalid search/reservation | Bad or missing input | `422` | `room_search_invalid` / `reservation_invalid` | `WARNING` |
 | Capacity conflict | Guest count exceeds room capacity | `409` | `reservation_capacity_conflict` | `WARNING` |
 | Payment rejection | Demo payment outcome: provider rejects payment | `502` | `payment_provider_rejected` | `ERROR` |
@@ -117,6 +122,8 @@ All error responses use this shape:
 | Availability database timeout | Demo Lab or request scenario header | `503` | `database_timeout` | `ERROR` |
 | Invalid check-in | Check in non-confirmed booking | `409` | `check_in_invalid_state` | `WARNING` |
 | Traffic burst | Demo Lab or CLI script | repeated `200` | `room_search_completed` | `INFO` |
+| Guest registration | Create new guest account | `201` | `auth_register_success` | `INFO` |
+| Duplicate email | Register with existing email | `409` | `auth_register_duplicate` | `WARNING` |
 | Failed login | Invalid credentials in login | `401` | `auth_login_failed` | `WARNING` |
 | Unauthorized desk access | Guest / unauthenticated query to desk | `403` | `auth_unauthorized_access` | `WARNING` |
 | Confirmation dispatched | Worker outbox processing | `200` | `confirmation_sent` | `INFO` |
@@ -137,7 +144,10 @@ The following were run and observed locally:
 - `database_timeout` with `ERROR`, route `/api/rooms`, status `503`.
 - `payment_slow` with `WARNING` and observed response time of about 131 ms.
 - `auth_login_success` and `auth_login_failed` with `WARNING` and 401 status.
+- `auth_register_success` and `auth_register_duplicate` with `WARNING` and 409 status.
 - `auth_unauthorized_access` with `WARNING` and 403 status.
+- `reservation_cancelled` with `INFO` and 200 status.
+- `room_unavailable_cleaning` with `WARNING` and 409 status.
 - `confirmation_sent` emitted by confirmation-worker with `INFO`.
 
 ## Testing and local run commands
@@ -150,7 +160,7 @@ node src/server.js
 
 Open `http://localhost:8081` for the current app.
 
-Current test status at the time of this memory: **9 tests passing**.
+Current test status at the time of this memory: **12 tests passing**.
 
 ## GCP target architecture (not deployed yet)
 
