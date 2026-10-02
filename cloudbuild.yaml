@@ -1,0 +1,50 @@
+# Google Cloud Build Pipeline for StaySync
+# Automates testing, container image build via Cloud Buildpacks, and deployment to Cloud Run
+
+steps:
+  # Step 1: Run automated tests before any build or deploy
+  - name: 'node:20-slim'
+    id: 'run-tests'
+    entrypoint: 'npm'
+    args: ['test']
+
+  # Step 2: Build container image using Google Cloud Buildpacks (No Dockerfile required)
+  - name: 'gcr.io/k8s-skaffold/pack'
+    id: 'build-image'
+    entrypoint: 'pack'
+    args:
+      - 'build'
+      - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/staysync/staysync-app:$COMMIT_SHA'
+      - '--builder=gcr.io/buildpacks/builder:google-22'
+      - '--path=.'
+
+  # Step 3: Push image to Google Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-image'
+    args:
+      - 'push'
+      - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/staysync/staysync-app:$COMMIT_SHA'
+
+  # Step 4: Deploy the API service to Google Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-api-cloud-run'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'staysync-api'
+      - '--image=$_LOCATION-docker.pkg.dev/$PROJECT_ID/staysync/staysync-app:$COMMIT_SHA'
+      - '--region=$_LOCATION'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--port=8081'
+      - '--set-env-vars=NODE_ENV=production'
+
+substitutions:
+  _LOCATION: 'us-central1'
+
+images:
+  - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/staysync/staysync-app:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -85,12 +85,17 @@ Search rooms → Hold a room → Choose simulated payment outcome
 ### Current API surface
 
 - `GET /health`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
 - `GET /api/rooms?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD&guests=number`
 - `POST /api/reservations`
 - `POST /api/payments`
-- `GET /api/reservations`
-- `PATCH /api/reservations/:id/check-in`
-- `PATCH /api/rooms/:id/housekeeping`
+- `GET /api/reservations` (protected: staff role required)
+- `GET /api/reservations/my` (protected: active session required)
+- `PATCH /api/reservations/:id/check-in` (protected: staff role required)
+- `PATCH /api/rooms/:id/housekeeping` (protected: staff role required)
+- `POST /pubsub/confirmations` (worker push endpoint)
 
 All error responses use this shape:
 
@@ -112,6 +117,9 @@ All error responses use this shape:
 | Availability database timeout | Demo Lab or request scenario header | `503` | `database_timeout` | `ERROR` |
 | Invalid check-in | Check in non-confirmed booking | `409` | `check_in_invalid_state` | `WARNING` |
 | Traffic burst | Demo Lab or CLI script | repeated `200` | `room_search_completed` | `INFO` |
+| Failed login | Invalid credentials in login | `401` | `auth_login_failed` | `WARNING` |
+| Unauthorized desk access | Guest / unauthenticated query to desk | `403` | `auth_unauthorized_access` | `WARNING` |
+| Confirmation dispatched | Worker outbox processing | `200` | `confirmation_sent` | `INFO` |
 
 ### Logging contract
 
@@ -128,6 +136,9 @@ The following were run and observed locally:
 - `payment_provider_rejected` with `ERROR`, route `/api/payments`, status `502`.
 - `database_timeout` with `ERROR`, route `/api/rooms`, status `503`.
 - `payment_slow` with `WARNING` and observed response time of about 131 ms.
+- `auth_login_success` and `auth_login_failed` with `WARNING` and 401 status.
+- `auth_unauthorized_access` with `WARNING` and 403 status.
+- `confirmation_sent` emitted by confirmation-worker with `INFO`.
 
 ## Testing and local run commands
 
@@ -139,7 +150,7 @@ node src/server.js
 
 Open `http://localhost:8081` for the current app.
 
-Current test status at the time of this memory: **6 tests passing**.
+Current test status at the time of this memory: **9 tests passing**.
 
 ## GCP target architecture (not deployed yet)
 
