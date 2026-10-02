@@ -53,6 +53,23 @@ test("the payment failure scenario returns a 502 and an ERROR log without confir
   assert.equal(logs.at(-1).statusCode, 502);
 });
 
+test("slow payment and database timeout scenarios produce diagnosable telemetry", async () => {
+  const logs = [];
+  const app = createStaySyncApp({ writeLog: (entry) => logs.push(entry) });
+  const hold = await app.fetch(new Request("http://localhost/api/reservations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ roomId: "room-garden-suite", checkIn: "2026-12-26", checkOut: "2026-12-28", guestCount: 2 }) }));
+  const { reservation } = await hold.json();
+  const payment = await app.fetch(new Request("http://localhost/api/payments", { method: "POST", headers: { "content-type": "application/json", "x-demo-scenario": "slow_payment" }, body: JSON.stringify({ reservationId: reservation.id }) }));
+  const timeout = await app.fetch(new Request("http://localhost/api/rooms?checkIn=2026-12-29&checkOut=2026-12-31&guests=2", { headers: { "x-demo-scenario": "database_timeout" } }));
+
+  assert.equal(payment.status, 201);
+  assert.equal(logs.at(-2).event, "payment_slow");
+  assert.equal(logs.at(-2).severity, "WARNING");
+  assert.ok(logs.at(-2).responseTimeMs >= 100);
+  assert.equal(timeout.status, 503);
+  assert.equal(logs.at(-1).event, "database_timeout");
+  assert.equal(logs.at(-1).severity, "ERROR");
+});
+
 test("staff can check in a confirmed reservation", async () => {
   const app = createStaySyncApp();
   const hold = await app.fetch(new Request("http://localhost/api/reservations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ roomId: "room-garden-suite", checkIn: "2026-12-19", checkOut: "2026-12-21", guestCount: 2 }) }));

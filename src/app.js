@@ -17,7 +17,9 @@ export function createStaySyncApp({ store = createStaySyncStore(), writeLog = ()
         component = "platform"; message = "Health check completed";
       } else if (request.method === "GET" && url.pathname === "/api/rooms") {
         const checkIn = url.searchParams.get("checkIn"); const checkOut = url.searchParams.get("checkOut"); const guestCount = Number(url.searchParams.get("guests"));
-        if (!validDate(checkIn) || !validDate(checkOut) || checkIn >= checkOut || !Number.isInteger(guestCount) || guestCount < 1) {
+        if (request.headers.get("x-demo-scenario") === "database_timeout") {
+          response = error("DATABASE_TIMEOUT", "Availability service could not reach its database", 503); event = "database_timeout"; severity = "ERROR"; message = "Simulated database timeout while searching rooms";
+        } else if (!validDate(checkIn) || !validDate(checkOut) || checkIn >= checkOut || !Number.isInteger(guestCount) || guestCount < 1) {
           response = error("VALIDATION_ERROR", "checkIn, checkOut, and a positive guests value are required", 422); event = "room_search_invalid"; severity = "WARNING"; message = "Invalid room search";
         } else { response = json({ rooms: store.searchRooms({ checkIn, checkOut, guestCount }) }); event = "room_search_completed"; message = "Room search completed"; }
       } else if (request.method === "POST" && url.pathname === "/api/reservations") {
@@ -38,10 +40,12 @@ export function createStaySyncApp({ store = createStaySyncStore(), writeLog = ()
         } else if (request.headers.get("x-demo-scenario") === "payment_failure") {
           response = error("PAYMENT_PROVIDER_REJECTED", "The simulated payment provider rejected this booking", 502); event = "payment_provider_rejected"; severity = "ERROR"; message = "Simulated provider rejected payment";
         } else {
+          const slowPayment = request.headers.get("x-demo-scenario") === "slow_payment";
+          if (slowPayment) await new Promise((resolve) => setTimeout(resolve, 125));
           const result = store.confirmReservation(input.reservationId);
           if (result.kind === "not_found") { response = error("RESERVATION_NOT_FOUND", "The reservation does not exist", 404); event = "payment_reservation_missing"; severity = "WARNING"; message = "Payment referenced missing reservation"; }
           else if (result.kind === "invalid_state") { response = error("RESERVATION_NOT_PAYABLE", "Only held reservations can be paid", 409); event = "payment_invalid_state"; severity = "WARNING"; message = "Payment attempted for invalid reservation state"; }
-          else { response = json({ payment: result.payment, reservation: result.reservation }, 201); event = "confirmation_requested"; message = "Booking confirmation event requested"; }
+          else { response = json({ payment: result.payment, reservation: result.reservation }, 201); event = slowPayment ? "payment_slow" : "confirmation_requested"; severity = slowPayment ? "WARNING" : "INFO"; message = slowPayment ? "Payment completed above demo latency threshold" : "Booking confirmation event requested"; }
         }
       } else if (request.method === "GET" && url.pathname === "/api/reservations") {
         response = json({ reservations: store.listReservations() }); component = "operations"; event = "reservation_listed"; message = "Reservations retrieved";
