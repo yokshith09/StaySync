@@ -1,6 +1,12 @@
 # Monitoring & Cost Optimization Dashboard — Plan
 
-**Status:** not started · **This is the graded deliverable.**
+**Status:** built, in its own repository · **This is the graded deliverable.**
+
+> The dashboard lives in **[Vantage](https://github.com/yokshith09/StaySync)**'s
+> sibling repo at `E:\Vantage`, not here. StaySync is only the demo source
+> application that produces the telemetry it reads. For what is and is not
+> covered against the product document, see Vantage's `docs/REQUIREMENTS.md` —
+> this file remains the original plan, kept for the reasoning behind it.
 
 ---
 
