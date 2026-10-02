@@ -1,5 +1,5 @@
 import pg from "pg";
-import { defaultSeedUsers, verifyPassword, generateToken, hashToken } from "./auth.js";
+import { defaultSeedUsers, hashPassword, verifyPassword, generateToken, hashToken } from "./auth.js";
 
 const { Pool } = pg;
 
@@ -21,6 +21,25 @@ export function createStaySyncStore() {
   const outbox = [];
 
   return {
+    async registerUser({ email, password, name }) {
+      const existing = [...users.values()].find((u) => u.email.toLowerCase() === email?.toLowerCase());
+      if (existing) return { kind: "email_exists" };
+
+      const { hash, salt } = hashPassword(password);
+      const user = {
+        id: `user-${crypto.randomUUID().slice(0, 8)}`,
+        email: email.trim().toLowerCase(),
+        name: name.trim(),
+        role: "guest",
+        hash,
+        salt,
+        createdAt: new Date().toISOString()
+      };
+      users.set(user.id, user);
+      const session = await this.createSession(user.id);
+      return { kind: "created", user: { id: user.id, email: user.email, name: user.name, role: user.role }, token: session.token };
+    },
+
     async authenticateUser({ email, password }) {
       const user = [...users.values()].find((u) => u.email.toLowerCase() === email?.toLowerCase());
       if (!user) return null;
@@ -74,6 +93,10 @@ export function createStaySyncStore() {
       ).map((room) => ({ ...room }));
     },
 
+    async listAllRooms() {
+      return [...rooms.values()].map((r) => ({ ...r }));
+    },
+
     async createHold({ roomId, checkIn, checkOut, guestCount, userId = null }) {
       const room = rooms.get(roomId);
       if (!room) return { kind: "room_not_found" };
@@ -86,7 +109,7 @@ export function createStaySyncStore() {
           overlaps(checkIn, checkOut, res.checkIn, res.checkOut)
         )
       ) {
-        return { kind: "conflict" };
+        return { kind: "conflict", housekeepingStatus: room.housekeepingStatus };
       }
       const reservation = {
         id: crypto.randomUUID(),
@@ -118,6 +141,28 @@ export function createStaySyncStore() {
       };
       outbox.push(event);
       return { kind: "confirmed", reservation: { ...reservation }, payment, event };
+    },
+
+    async cancelReservation(reservationId, { userId = null, role = "guest" } = {}) {
+      const reservation = reservations.get(reservationId);
+      if (!reservation) return { kind: "not_found" };
+      if (role !== "staff" && reservation.userId && reservation.userId !== userId) {
+        return { kind: "forbidden" };
+      }
+      if (["CANCELLED", "CHECKED_IN", "CHECKED_OUT"].includes(reservation.status)) {
+        return { kind: "invalid_state", currentStatus: reservation.status };
+      }
+      reservation.status = "CANCELLED";
+      const event = {
+        id: crypto.randomUUID(),
+        eventType: "booking.cancelled",
+        aggregateId: reservationId,
+        payload: { reservationId, roomId: reservation.roomId, status: "CANCELLED" },
+        publishedAt: null,
+        createdAt: new Date().toISOString()
+      };
+      outbox.push(event);
+      return { kind: "cancelled", reservation: { ...reservation } };
     },
 
     async listReservations({ userId = null, role = "staff" } = {}) {
@@ -158,6 +203,26 @@ export function createPostgresStore(connectionString) {
   const pool = new Pool({ connectionString });
 
   return {
+    async registerUser({ email, password, name }) {
+      const { hash, salt } = hashPassword(password);
+      const userId = `user-${crypto.randomUUID().slice(0, 8)}`;
+      try {
+        await pool.query(
+          "INSERT INTO users (id, email, password_hash, salt, role, full_name) VALUES ($1, $2, $3, $4, 'guest', $5)",
+          [userId, email.trim().toLowerCase(), hash, salt, name.trim()]
+        );
+        const session = await this.createSession(userId);
+        return {
+          kind: "created",
+          user: { id: userId, email: email.trim().toLowerCase(), name: name.trim(), role: "guest" },
+          token: session.token
+        };
+      } catch (err) {
+        if (err.code === "23505") return { kind: "email_exists" };
+        throw err;
+      }
+    },
+
     async authenticateUser({ email, password }) {
       const { rows } = await pool.query(
         "SELECT id, email, full_name as name, role, password_hash, salt FROM users WHERE LOWER(email) = LOWER($1)",
@@ -220,6 +285,18 @@ export function createPostgresStore(connectionString) {
       return rows;
     },
 
+    async listAllRooms() {
+      const query = `
+        SELECT r.id, r.name, r.capacity, r.nightly_rate_cents as "nightlyRateCents",
+               r.housekeeping_status as "housekeepingStatus", h.name as hotel
+        FROM rooms r
+        JOIN hotels h ON r.hotel_id = h.id
+        ORDER BY r.name ASC
+      `;
+      const { rows } = await pool.query(query);
+      return rows;
+    },
+
     async createHold({ roomId, checkIn, checkOut, guestCount, userId = null }) {
       const client = await pool.connect();
       try {
@@ -235,7 +312,10 @@ export function createPostgresStore(connectionString) {
         const room = roomRes.rows[0];
         if (!room) { await client.query("ROLLBACK"); return { kind: "room_not_found" }; }
         if (room.capacity < guestCount) { await client.query("ROLLBACK"); return { kind: "capacity_exceeded" }; }
-        if (room.housekeepingStatus !== "READY") { await client.query("ROLLBACK"); return { kind: "conflict" }; }
+        if (room.housekeepingStatus !== "READY") {
+          await client.query("ROLLBACK");
+          return { kind: "conflict", housekeepingStatus: room.housekeepingStatus };
+        }
 
         const conflictRes = await client.query(
           `SELECT 1 FROM reservations
@@ -247,7 +327,7 @@ export function createPostgresStore(connectionString) {
         );
         if (conflictRes.rowCount > 0) {
           await client.query("ROLLBACK");
-          return { kind: "conflict" };
+          return { kind: "conflict", housekeepingStatus: room.housekeepingStatus };
         }
 
         const reservationId = crypto.randomUUID();
@@ -294,6 +374,39 @@ export function createPostgresStore(connectionString) {
           payment: { id: paymentId, reservationId, status: "APPROVED" },
           event: { id: eventId, eventType: "booking.confirmation.requested" }
         };
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+
+    async cancelReservation(reservationId, { userId = null, role = "guest" } = {}) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const resCheck = await client.query("SELECT * FROM reservations WHERE id = $1 FOR UPDATE", [reservationId]);
+        const reservation = resCheck.rows[0];
+        if (!reservation) { await client.query("ROLLBACK"); return { kind: "not_found" }; }
+        if (role !== "staff" && reservation.user_id && reservation.user_id !== userId) {
+          await client.query("ROLLBACK");
+          return { kind: "forbidden" };
+        }
+        if (["CANCELLED", "CHECKED_IN", "CHECKED_OUT"].includes(reservation.status)) {
+          await client.query("ROLLBACK");
+          return { kind: "invalid_state", currentStatus: reservation.status };
+        }
+
+        await client.query("UPDATE reservations SET status = 'CANCELLED' WHERE id = $1", [reservationId]);
+        const eventId = crypto.randomUUID();
+        const payload = { reservationId, roomId: reservation.room_id, status: "CANCELLED" };
+        await client.query(
+          "INSERT INTO outbox_events (id, event_type, aggregate_id, payload) VALUES ($1, 'booking.cancelled', $2, $3)",
+          [eventId, reservationId, JSON.stringify(payload)]
+        );
+        await client.query("COMMIT");
+        return { kind: "cancelled", reservation: { ...reservation, status: "CANCELLED" } };
       } catch (err) {
         await client.query("ROLLBACK");
         throw err;

@@ -2,15 +2,36 @@ const form = document.querySelector("#search");
 const rooms = document.querySelector("#rooms");
 const status = document.querySelector("#status");
 const journey = document.querySelector("#journey");
-const operations = document.querySelector("#operations-list");
 const deskLock = document.querySelector("#desk-lock");
+const deskContent = document.querySelector("#desk-content");
+const roomInventory = document.querySelector("#room-inventory");
+const operationsList = document.querySelector("#operations-list");
 const guestReservation = document.querySelector("#guest-reservation");
 const scenarioResult = document.querySelector("#scenario-result");
 const userBadge = document.querySelector("#user-badge");
-const authToggleBtn = document.querySelector("#auth-toggle-btn");
+const openAuthBtn = document.querySelector("#open-auth-btn");
+const signOutBtn = document.querySelector("#sign-out-btn");
 const quickStaffLogin = document.querySelector("#quick-staff-login");
 
+// Modal Elements
+const authDialog = document.querySelector("#auth-dialog");
+const authTitle = document.querySelector("#auth-title");
+const closeAuthBtn = document.querySelector("#close-auth-btn");
+const tabLogin = document.querySelector("#tab-login");
+const tabRegister = document.querySelector("#tab-register");
+const loginForm = document.querySelector("#login-form");
+const registerForm = document.querySelector("#register-form");
+const authError = document.querySelector("#auth-error");
+const quickPickStaff = document.querySelector("#quick-pick-staff");
+const quickPickGuest = document.querySelector("#quick-pick-guest");
+
+const receiptDialog = document.querySelector("#receipt-dialog");
+const receiptContent = document.querySelector("#receipt-content");
+const closeReceiptBtn = document.querySelector("#close-receipt-btn");
+const dismissReceiptBtn = document.querySelector("#dismiss-receipt-btn");
+
 let activeReservationId = null;
+let currentReservationData = null;
 let currentToken = localStorage.getItem("staysync_token") || null;
 let currentUser = null;
 
@@ -30,65 +51,28 @@ async function request(path, options = {}) {
 }
 
 function updateAuthUI() {
-  if (currentUser && currentUser.role === "staff") {
-    userBadge.textContent = `Staff: ${currentUser.name}`;
-    userBadge.className = "user-badge staff";
-    authToggleBtn.textContent = "Sign Out";
-    if (deskLock) deskLock.hidden = true;
-    if (operations) operations.hidden = false;
-  } else if (currentUser && currentUser.role === "guest") {
-    userBadge.textContent = `Guest: ${currentUser.name}`;
-    userBadge.className = "user-badge guest";
-    authToggleBtn.textContent = "Switch to Staff";
-    if (deskLock) deskLock.hidden = false;
-    if (operations) operations.hidden = true;
+  if (currentUser) {
+    userBadge.textContent = `${currentUser.name} (${currentUser.role})`;
+    userBadge.className = `user-badge ${currentUser.role}`;
+    openAuthBtn.hidden = true;
+    signOutBtn.hidden = false;
+
+    if (currentUser.role === "staff") {
+      deskLock.hidden = true;
+      deskContent.hidden = false;
+    } else {
+      deskLock.hidden = false;
+      deskContent.hidden = true;
+    }
   } else {
     userBadge.textContent = "Guest mode";
     userBadge.className = "user-badge";
-    authToggleBtn.textContent = "Staff Login";
-    if (deskLock) deskLock.hidden = false;
-    if (operations) operations.hidden = true;
+    openAuthBtn.hidden = false;
+    signOutBtn.hidden = true;
+    deskLock.hidden = false;
+    deskContent.hidden = true;
   }
 }
-
-async function loginAs(email, password) {
-  const { response, body } = await request("/api/auth/login", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, password })
-  });
-  if (response.ok) {
-    currentToken = body.token;
-    currentUser = body.user;
-    localStorage.setItem("staysync_token", currentToken);
-    updateAuthUI();
-    setStatus(`Signed in as ${currentUser.name} (${currentUser.role}).`, "success");
-    if (currentUser.role === "staff") await loadOperations();
-  } else {
-    setStatus(body?.error?.message || "Login failed", "error");
-  }
-}
-
-async function logout() {
-  await request("/api/auth/logout", { method: "POST" });
-  currentToken = null;
-  currentUser = null;
-  localStorage.removeItem("staysync_token");
-  updateAuthUI();
-  setStatus("Signed out.", "info");
-}
-
-authToggleBtn?.addEventListener("click", async () => {
-  if (currentUser) {
-    await logout();
-  } else {
-    await loginAs("staff@staysync.internal", "DeskPass2026!");
-  }
-});
-
-quickStaffLogin?.addEventListener("click", async () => {
-  await loginAs("staff@staysync.internal", "DeskPass2026!");
-});
 
 async function checkSession() {
   if (!currentToken) return updateAuthUI();
@@ -101,22 +85,191 @@ async function checkSession() {
     localStorage.removeItem("staysync_token");
   }
   updateAuthUI();
-  if (currentUser?.role === "staff") await loadOperations();
+  if (currentUser?.role === "staff") await loadDesk();
+  await loadMyStays();
+}
+
+async function loginUser(email, password) {
+  authError.hidden = true;
+  const { response, body } = await request("/api/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, password })
+  });
+  if (response.ok) {
+    currentToken = body.token;
+    currentUser = body.user;
+    localStorage.setItem("staysync_token", currentToken);
+    updateAuthUI();
+    authDialog.close();
+    setStatus(`Welcome back, ${currentUser.name}.`, "success");
+    if (currentUser.role === "staff") await loadDesk();
+    await loadMyStays();
+  } else {
+    authError.textContent = body?.error?.message || "Invalid email or password.";
+    authError.hidden = false;
+  }
+}
+
+async function registerUser(name, email, password) {
+  authError.hidden = true;
+  const { response, body } = await request("/api/auth/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, email, password })
+  });
+  if (response.ok) {
+    currentToken = body.token;
+    currentUser = body.user;
+    localStorage.setItem("staysync_token", currentToken);
+    updateAuthUI();
+    authDialog.close();
+    setStatus(`Account created. Welcome, ${currentUser.name}!`, "success");
+    await loadMyStays();
+  } else {
+    authError.textContent = body?.error?.message || "Registration failed.";
+    authError.hidden = false;
+  }
+}
+
+async function logout() {
+  await request("/api/auth/logout", { method: "POST" });
+  currentToken = null;
+  currentUser = null;
+  localStorage.removeItem("staysync_token");
+  updateAuthUI();
+  setStatus("Signed out.", "info");
+}
+
+// Modal Listeners
+openAuthBtn?.addEventListener("click", () => {
+  authError.hidden = true;
+  authDialog.showModal();
+});
+
+closeAuthBtn?.addEventListener("click", () => authDialog.close());
+signOutBtn?.addEventListener("click", logout);
+
+tabLogin?.addEventListener("click", () => {
+  tabLogin.classList.add("active");
+  tabRegister.classList.remove("active");
+  loginForm.hidden = false;
+  registerForm.hidden = true;
+  authError.hidden = true;
+});
+
+tabRegister?.addEventListener("click", () => {
+  tabRegister.classList.add("active");
+  tabLogin.classList.remove("active");
+  registerForm.hidden = false;
+  loginForm.hidden = true;
+  authError.hidden = true;
+});
+
+loginForm?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(loginForm));
+  await loginUser(data.email, data.password);
+});
+
+registerForm?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(registerForm));
+  await registerUser(data.name, data.email, data.password);
+});
+
+quickPickStaff?.addEventListener("click", () => {
+  loginForm.elements.email.value = "staff@staysync.internal";
+  loginForm.elements.password.value = "DeskPass2026!";
+});
+
+quickPickGuest?.addEventListener("click", () => {
+  loginForm.elements.email.value = "guest@staysync.internal";
+  loginForm.elements.password.value = "GuestPass2026!";
+});
+
+quickStaffLogin?.addEventListener("click", () => loginUser("staff@staysync.internal", "DeskPass2026!"));
+
+closeReceiptBtn?.addEventListener("click", () => receiptDialog.close());
+dismissReceiptBtn?.addEventListener("click", () => receiptDialog.close());
+
+function showReceipt(reservation, room) {
+  const checkIn = new Date(reservation.checkIn);
+  const checkOut = new Date(reservation.checkOut);
+  const nights = Math.max(1, Math.round((checkOut - checkIn) / (1000 * 60 * 60 * 24)));
+  const rate = room.nightlyRateCents || 18400;
+  const total = nights * rate;
+
+  receiptContent.innerHTML = `
+    <div class="receipt-header">
+      <h4>${room.hotel || "Harbor House"}</h4>
+      <p class="receipt-ref">FOLIO #${reservation.id.slice(0, 8).toUpperCase()}</p>
+    </div>
+    <div class="receipt-details">
+      <div><strong>Guest</strong><p>${currentUser ? currentUser.name : "Guest Traveler"}</p></div>
+      <div><strong>Status</strong><p class="state">${reservation.status.replace("_", " ")}</p></div>
+      <div><strong>Dates</strong><p>${reservation.checkIn} → ${reservation.checkOut} (${nights} night${nights > 1 ? "s" : ""})</p></div>
+      <div><strong>Room</strong><p>${room.name} · Sleeps ${reservation.guestCount}</p></div>
+    </div>
+    <div class="receipt-charges">
+      <div class="charge-row"><span>${nights} night(s) @ ${money(rate)}/night</span><strong>${money(total)}</strong></div>
+      <div class="charge-row"><span>Occupancy & city fees</span><strong>$0 (Demo waiver)</strong></div>
+      <div class="charge-total"><span>Total Paid</span><strong>${money(total)}</strong></div>
+    </div>
+  `;
+  receiptDialog.showModal();
 }
 
 function renderGuestReservation(reservation, room) {
+  currentReservationData = { reservation, room };
+  const isCancellable = !["CANCELLED", "CHECKED_IN", "CHECKED_OUT"].includes(reservation.status);
+
   guestReservation.innerHTML = `
     <article class="reservation-summary">
-      <p class="room-meta">${room.hotel} · ${room.name}</p>
+      <div class="summary-top">
+        <p class="room-meta">${room.hotel || "Harbor House"} · ${room.name}</p>
+        <span class="state ${reservation.status.toLowerCase()}">${reservation.status.replace("_", " ")}</span>
+      </div>
       <h3>${reservation.checkIn} → ${reservation.checkOut}</h3>
-      <p>${reservation.guestCount} guests · <span class="state">${reservation.status.replace("_", " ")}</span></p>
-      <p class="reference">BOOKING ${reservation.id.slice(0, 8).toUpperCase()}</p>
+      <p>${reservation.guestCount} guests · BOOKING REFERENCE: <strong>${reservation.id.slice(0, 8).toUpperCase()}</strong></p>
+      <div class="reservation-buttons">
+        <button type="button" class="quiet-button view-receipt-btn" data-id="${reservation.id}">View Guest Folio</button>
+        ${isCancellable ? `<button type="button" class="cancel-booking-btn" data-id="${reservation.id}">Cancel Reservation</button>` : ""}
+      </div>
     </article>
   `;
 }
 
+guestReservation?.addEventListener("click", async (e) => {
+  if (e.target.classList.contains("view-receipt-btn") && currentReservationData) {
+    showReceipt(currentReservationData.reservation, currentReservationData.room);
+  } else if (e.target.classList.contains("cancel-booking-btn")) {
+    const id = e.target.dataset.id;
+    if (!confirm("Are you sure you wish to cancel this reservation?")) return;
+    const { response, body } = await request(`/api/reservations/${id}/cancel`, { method: "POST" });
+    if (response.ok) {
+      setStatus("Reservation cancelled. Room availability released.", "success");
+      currentReservationData.reservation.status = "CANCELLED";
+      renderGuestReservation(currentReservationData.reservation, currentReservationData.room);
+      if (currentUser?.role === "staff") await loadDesk();
+    } else {
+      setStatus(body?.error?.message || "Failed to cancel reservation", "error");
+    }
+  }
+});
+
+async function loadMyStays() {
+  if (!currentUser) return;
+  const { response, body } = await request("/api/reservations/my");
+  if (response.ok && body.reservations?.length > 0) {
+    const latest = body.reservations[0];
+    renderGuestReservation(latest, latest.room);
+  }
+}
+
 function showJourney(reservation, room) {
   activeReservationId = reservation.id;
+  currentReservationData = { reservation, room };
   journey.hidden = false;
   renderGuestReservation(reservation, room);
   journey.innerHTML = `
@@ -150,12 +303,14 @@ form?.addEventListener("submit", async (event) => {
   setStatus(body.rooms.length ? `${body.rooms.length} rooms are ready for your dates.` : "No rooms are available for these dates.");
   rooms.innerHTML = body.rooms.map((room, index) => `
     <article class="room-card" style="--delay:${index * 80}ms">
-      <p class="room-meta">${room.hotel} / ${room.housekeepingStatus}</p>
+      <p class="room-meta">${room.hotel} / <span class="state ${room.housekeepingStatus.toLowerCase()}">${room.housekeepingStatus}</span></p>
       <h3>${room.name}</h3>
       <p>Sleeps ${room.capacity}. A calm base for the coast and city alike.</p>
       <div class="room-bottom">
         <strong>${money(room.nightlyRateCents)} <small>per night</small></strong>
-        <button data-room="${room.id}">Hold room</button>
+        <button data-room="${room.id}" ${room.housekeepingStatus !== "READY" ? "disabled" : ""}>
+          ${room.housekeepingStatus === "READY" ? "Hold room" : "Under Service"}
+        </button>
       </div>
     </article>
   `).join("");
@@ -207,49 +362,99 @@ journey?.addEventListener("click", async (event) => {
       <p>A confirmation event has been written to the database outbox. In the deployed demo, Pub/Sub delivers this to the confirmation worker.</p>
       <p class="reference">CONFIRMED ${body.reservation.id.slice(0, 8).toUpperCase()}</p>
     </div>
-    <a class="button-link" href="#operations">Open hotel desk</a>
+    <div class="confirmed-actions">
+      <button type="button" id="journey-receipt-btn" class="button-link">View Folio Receipt</button>
+      <a class="button-link secondary" href="#operations">Open hotel desk</a>
+    </div>
   `;
+  document.querySelector("#journey-receipt-btn")?.addEventListener("click", () => {
+    showReceipt(body.reservation, currentReservationData.room);
+  });
+
   setStatus(scenario === "slow_payment" ? "Payment was approved after simulated slow response." : "Payment approved and confirmation event queued.", "success");
-  renderGuestReservation(body.reservation, { hotel: "Harbor House", name: "Your selected room" });
-  if (currentUser?.role === "staff") await loadOperations();
+  renderGuestReservation(body.reservation, currentReservationData.room);
+  if (currentUser?.role === "staff") await loadDesk();
 });
 
-async function loadOperations() {
-  if (!currentUser || currentUser.role !== "staff") {
-    if (deskLock) deskLock.hidden = false;
-    if (operations) operations.hidden = true;
-    return;
-  }
-  if (deskLock) deskLock.hidden = true;
-  if (operations) operations.hidden = false;
+async function loadDesk() {
+  if (!currentUser || currentUser.role !== "staff") return;
 
-  const { response, body } = await request("/api/reservations");
-  if (!response.ok) {
-    operations.innerHTML = `<p class="empty">${body?.error?.message || "Could not retrieve desk reservations"}</p>`;
+  // 1. Load Room Inventory & Housekeeping
+  const roomRes = await request("/api/rooms/all");
+  if (roomRes.response.ok) {
+    roomInventory.innerHTML = roomRes.body.rooms.map((r) => `
+      <div class="inventory-card">
+        <div>
+          <strong>${r.name}</strong> <span class="room-hotel">${r.hotel}</span>
+          <p class="status-indicator ${r.housekeepingStatus.toLowerCase()}">${r.housekeepingStatus}</p>
+        </div>
+        <div class="inventory-controls">
+          <button type="button" class="mini-btn ${r.housekeepingStatus === 'READY' ? 'active' : ''}" data-room="${r.id}" data-action="READY">Ready</button>
+          <button type="button" class="mini-btn ${r.housekeepingStatus === 'CLEANING' ? 'active' : ''}" data-room="${r.id}" data-action="CLEANING">Cleaning</button>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  // 2. Load Reservations
+  const res = await request("/api/reservations");
+  if (!res.response.ok) {
+    operationsList.innerHTML = `<p class="empty">${res.body?.error?.message || "Could not retrieve reservations"}</p>`;
     return;
   }
-  operations.innerHTML = body.reservations.length ? body.reservations.map((reservation) => `
+  operationsList.innerHTML = res.body.reservations.length ? res.body.reservations.map((reservation) => `
     <article class="reservation-row">
       <div>
         <p class="room-meta">${reservation.room.hotel} · ${reservation.room.name}</p>
         <h3>${reservation.checkIn} → ${reservation.checkOut}</h3>
-        <p>${reservation.guestCount} guests · <span class="state">${reservation.status.replace("_", " ")}</span></p>
+        <p>${reservation.guestCount} guests · <span class="state ${reservation.status.toLowerCase()}">${reservation.status.replace("_", " ")}</span></p>
       </div>
-      ${reservation.status === "CONFIRMED" ? `<button data-checkin="${reservation.id}">Check in guest</button>` : ""}
+      <div class="row-actions">
+        ${reservation.status === "CONFIRMED" ? `<button data-checkin="${reservation.id}">Check in guest</button>` : ""}
+        ${!["CANCELLED", "CHECKED_IN", "CHECKED_OUT"].includes(reservation.status) ? `<button class="quiet-button cancel-row-btn" data-cancel="${reservation.id}">Cancel</button>` : ""}
+      </div>
     </article>
   `).join("") : `<p class="empty">No reservations yet. Complete a guest booking above to populate the desk.</p>`;
 }
 
-document.querySelector("#refresh-ops")?.addEventListener("click", loadOperations);
-document.querySelector("#refresh-stay")?.addEventListener("click", loadOperations);
+document.querySelector("#refresh-ops")?.addEventListener("click", loadDesk);
+document.querySelector("#refresh-stay")?.addEventListener("click", loadMyStays);
 
-operations?.addEventListener("click", async (event) => {
-  const id = event.target.dataset.checkin;
-  if (!id) return;
-  const { response, body } = await request(`/api/reservations/${id}/check-in`, { method: "PATCH" });
-  if (!response.ok) return setStatus(body?.error?.message || "Check-in failed", "error");
-  setStatus("Guest check-in recorded.", "success");
-  await loadOperations();
+roomInventory?.addEventListener("click", async (e) => {
+  const roomId = e.target.dataset.room;
+  const status = e.target.dataset.action;
+  if (!roomId || !status) return;
+
+  const { response, body } = await request(`/api/rooms/${roomId}/housekeeping`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ housekeepingStatus: status })
+  });
+
+  if (response.ok) {
+    setStatus(`Room ${roomId} housekeeping updated to ${status}.`, "success");
+    await loadDesk();
+  } else {
+    setStatus(body?.error?.message || "Failed to update room", "error");
+  }
+});
+
+operationsList?.addEventListener("click", async (event) => {
+  const checkInId = event.target.dataset.checkin;
+  const cancelId = event.target.dataset.cancel;
+
+  if (checkInId) {
+    const { response, body } = await request(`/api/reservations/${checkInId}/check-in`, { method: "PATCH" });
+    if (!response.ok) return setStatus(body?.error?.message || "Check-in failed", "error");
+    setStatus("Guest check-in recorded.", "success");
+    await loadDesk();
+  } else if (cancelId) {
+    if (!confirm("Cancel this booking?")) return;
+    const { response, body } = await request(`/api/reservations/${cancelId}/cancel`, { method: "POST" });
+    if (!response.ok) return setStatus(body?.error?.message || "Cancellation failed", "error");
+    setStatus("Reservation cancelled.", "success");
+    await loadDesk();
+  }
 });
 
 document.querySelector(".scenario-actions")?.addEventListener("click", async (event) => {

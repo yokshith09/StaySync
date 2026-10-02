@@ -161,6 +161,37 @@ test("authentication verifies credentials and creates a session token", async ()
   assert.equal(logs.at(-1).severity, "WARNING");
 });
 
+test("guest registration creates an account and prevents duplicates", async () => {
+  const logs = [];
+  const app = createStaySyncApp({ writeLog: (entry) => logs.push(entry) });
+
+  const regRes = await app.fetch(
+    new Request("http://localhost/api/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Elena Rostova", email: "elena@example.com", password: "Password2026!" })
+    })
+  );
+  assert.equal(regRes.status, 201);
+  const data = await regRes.json();
+  assert.ok(data.token);
+  assert.equal(data.user.email, "elena@example.com");
+  assert.equal(data.user.role, "guest");
+  assert.equal(logs.at(-1).event, "auth_register_success");
+
+  // Duplicate registration
+  const dupRes = await app.fetch(
+    new Request("http://localhost/api/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Elena Duplicate", email: "elena@example.com", password: "Password2026!" })
+    })
+  );
+  assert.equal(dupRes.status, 409);
+  assert.equal((await dupRes.json()).error.code, "EMAIL_EXISTS");
+  assert.equal(logs.at(-1).event, "auth_register_duplicate");
+});
+
 test("unauthorized access to hotel desk is blocked and logged", async () => {
   const logs = [];
   const app = createStaySyncApp({ writeLog: (entry) => logs.push(entry) });
@@ -212,6 +243,67 @@ test("staff can view desk reservations and check in a confirmed reservation", as
   );
   assert.equal(checkInRes.status, 200);
   assert.equal((await checkInRes.json()).reservation.status, "CHECKED_IN");
+});
+
+test("guests can cancel reservations, releasing availability", async () => {
+  const logs = [];
+  const store = createStaySyncStore();
+  const app = createStaySyncApp({ store, writeLog: (entry) => logs.push(entry) });
+
+  const hold = await app.fetch(
+    new Request("http://localhost/api/reservations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ roomId: "room-harbor-king", checkIn: "2027-03-01", checkOut: "2027-03-03", guestCount: 2 })
+    })
+  );
+  const { reservation } = await hold.json();
+
+  const cancelRes = await app.fetch(
+    new Request(`http://localhost/api/reservations/${reservation.id}/cancel`, { method: "POST" })
+  );
+  assert.equal(cancelRes.status, 200);
+  assert.equal((await cancelRes.json()).reservation.status, "CANCELLED");
+  assert.equal(logs.at(-1).event, "reservation_cancelled");
+
+  // Re-booking the same room for the same dates should now SUCCEED
+  const rebookRes = await app.fetch(
+    new Request("http://localhost/api/reservations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ roomId: "room-harbor-king", checkIn: "2027-03-01", checkOut: "2027-03-03", guestCount: 2 })
+    })
+  );
+  assert.equal(rebookRes.status, 201);
+});
+
+test("housekeeping status prevents booking and emits cleaning telemetry", async () => {
+  const logs = [];
+  const store = createStaySyncStore();
+  const app = createStaySyncApp({ store, writeLog: (entry) => logs.push(entry) });
+  const staffToken = await getStaffToken(app);
+
+  // Set room to CLEANING
+  const patchRes = await app.fetch(
+    new Request("http://localhost/api/rooms/room-city-twin/housekeeping", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", authorization: `Bearer ${staffToken}` },
+      body: JSON.stringify({ housekeepingStatus: "CLEANING" })
+    })
+  );
+  assert.equal(patchRes.status, 200);
+
+  // Attempting to hold this room should now fail with 409 ROOM_UNDER_CLEANING
+  const holdRes = await app.fetch(
+    new Request("http://localhost/api/reservations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ roomId: "room-city-twin", checkIn: "2027-04-10", checkOut: "2027-04-12", guestCount: 2 })
+    })
+  );
+  assert.equal(holdRes.status, 409);
+  assert.equal((await holdRes.json()).error.code, "ROOM_UNDER_CLEANING");
+  assert.equal(logs.at(-1).event, "room_unavailable_cleaning");
 });
 
 test("confirmation worker processes outbox events and logs telemetry", async () => {

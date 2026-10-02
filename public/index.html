@@ -20,7 +20,8 @@
     </nav>
     <div class="auth-status" id="auth-status">
       <span id="user-badge" class="user-badge">Guest mode</span>
-      <button id="auth-toggle-btn" class="mini-btn">Staff Login</button>
+      <button id="open-auth-btn" class="mini-btn">Sign In / Register</button>
+      <button id="sign-out-btn" class="mini-btn" hidden>Sign Out</button>
     </div>
   </header>
 
@@ -79,15 +80,27 @@
           <p class="kicker">For the hotel team</p>
           <h2>Today’s desk</h2>
         </div>
-        <button class="quiet-button" id="refresh-ops">Refresh reservations</button>
+        <button class="quiet-button" id="refresh-ops">Refresh desk</button>
       </div>
-      <p class="desk-copy">Review confirmed stays, complete guest arrivals, and make room readiness visible to the property team.</p>
+      <p class="desk-copy">Review confirmed stays, complete guest arrivals, and control room housekeeping readiness.</p>
+      
       <div id="desk-lock" class="desk-lock" hidden>
-        <p>Staff credentials required. Sign in as hotel staff to review the arrivals roster and check in guests.</p>
-        <button id="quick-staff-login" class="quiet-button">Sign in as Desk Staff</button>
+        <p>Staff credentials required. Sign in as hotel staff to review the arrivals roster, check in guests, and manage room housekeeping.</p>
+        <button id="quick-staff-login" class="quiet-button">Sign in as Desk Staff (Alex Vance)</button>
       </div>
-      <div id="operations-list" class="operations-list">
-        <p class="empty">No reservations yet. Complete a guest booking above to populate the desk.</p>
+
+      <div id="desk-content" class="desk-content">
+        <div class="desk-subpanel">
+          <h3>Room Inventory & Housekeeping</h3>
+          <div id="room-inventory" class="room-inventory">Loading rooms...</div>
+        </div>
+
+        <div class="desk-subpanel">
+          <h3>Arrivals & Reservations</h3>
+          <div id="operations-list" class="operations-list">
+            <p class="empty">No reservations yet. Complete a guest booking above to populate the desk.</p>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -108,6 +121,62 @@
       <p id="scenario-result" role="status"></p>
     </section>
   </main>
+
+  <!-- Auth Dialog (Login / Register) -->
+  <dialog id="auth-dialog" class="hotel-modal">
+    <div class="modal-header">
+      <h3 id="auth-title">StaySync Account</h3>
+      <button type="button" class="close-btn" id="close-auth-btn">&times;</button>
+    </div>
+    <div class="auth-tabs">
+      <button type="button" class="tab-btn active" id="tab-login">Sign In</button>
+      <button type="button" class="tab-btn" id="tab-register">Create Account</button>
+    </div>
+
+    <!-- Login Form -->
+    <form id="login-form" class="modal-form">
+      <label>Email address
+        <input name="email" type="email" required placeholder="sarah@example.com" value="staff@staysync.internal">
+      </label>
+      <label>Password
+        <input name="password" type="password" required value="DeskPass2026!">
+      </label>
+      <button type="submit" class="submit-btn">Sign In</button>
+      <div class="demo-quick-picks">
+        <span>Quick demo picks:</span>
+        <button type="button" id="quick-pick-staff" class="pill-btn">Staff (Alex Vance)</button>
+        <button type="button" id="quick-pick-guest" class="pill-btn">Guest (Sarah Jenkins)</button>
+      </div>
+    </form>
+
+    <!-- Register Form -->
+    <form id="register-form" class="modal-form" hidden>
+      <label>Full name
+        <input name="name" type="text" required placeholder="Elena Rostova">
+      </label>
+      <label>Email address
+        <input name="email" type="email" required placeholder="elena@example.com">
+      </label>
+      <label>Password (min 6 chars)
+        <input name="password" type="password" minlength="6" required placeholder="••••••••">
+      </label>
+      <button type="submit" class="submit-btn">Create Account</button>
+    </form>
+    <p id="auth-error" class="modal-error" role="alert" hidden></p>
+  </dialog>
+
+  <!-- Voucher / Folio Receipt Dialog -->
+  <dialog id="receipt-dialog" class="hotel-modal receipt-modal">
+    <div class="modal-header">
+      <h3>StaySync Guest Folio</h3>
+      <button type="button" class="close-btn" id="close-receipt-btn">&times;</button>
+    </div>
+    <div id="receipt-content" class="receipt-content"></div>
+    <div class="receipt-footer">
+      <button type="button" class="quiet-button" onclick="window.print()">Print Folio</button>
+      <button type="button" id="dismiss-receipt-btn">Close</button>
+    </div>
+  </dialog>
 
   <footer>
     <span>STAYSYNC / HOSPITALITY DEMO</span>

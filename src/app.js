@@ -49,6 +49,31 @@ export function createStaySyncApp({
         });
         component = "platform";
         message = "Health check completed";
+      } else if (request.method === "POST" && url.pathname === "/api/auth/register") {
+        component = "auth";
+        let input;
+        try { input = await request.json(); } catch { input = null; }
+        if (!input?.name?.trim() || !input?.email?.trim() || !input?.password || input.password.length < 6) {
+          response = error("VALIDATION_ERROR", "Name, valid email, and password of at least 6 characters are required", 422);
+          event = "auth_register_invalid";
+          severity = "WARNING";
+          message = "Registration validation failed";
+        } else {
+          const result = await store.registerUser(input);
+          if (result.kind === "email_exists") {
+            response = error("EMAIL_EXISTS", "An account with this email address already exists", 409);
+            event = "auth_register_duplicate";
+            severity = "WARNING";
+            message = "Registration rejected due to duplicate email";
+          } else {
+            response = json({ token: result.token, user: result.user }, 201, {
+              "Set-Cookie": `session=${result.token}; HttpOnly; Path=/; SameSite=Lax`
+            });
+            event = "auth_register_success";
+            severity = "INFO";
+            message = "New guest registered and session established";
+          }
+        }
       } else if (request.method === "POST" && url.pathname === "/api/auth/login") {
         component = "auth";
         let input;
@@ -118,6 +143,19 @@ export function createStaySyncApp({
           event = "room_search_completed";
           message = "Room search completed";
         }
+      } else if (request.method === "GET" && url.pathname === "/api/rooms/all") {
+        component = "operations";
+        if (!currentUser || currentUser.role !== "staff") {
+          response = error("FORBIDDEN", "Staff credentials required to view full room inventory", 403);
+          event = "auth_unauthorized_access";
+          severity = "WARNING";
+          message = "Unauthorized room inventory query";
+        } else {
+          const rooms = await store.listAllRooms();
+          response = json({ rooms });
+          event = "rooms_catalog_listed";
+          message = "Room inventory retrieved";
+        }
       } else if (request.method === "POST" && url.pathname === "/api/reservations") {
         let input;
         try { input = await request.json(); } catch { input = null; }
@@ -140,10 +178,15 @@ export function createStaySyncApp({
             severity = "WARNING";
             message = "Room capacity exceeded";
           } else if (result.kind === "conflict") {
-            response = error("RESERVATION_CONFLICT", "This room is no longer available for the selected dates", 409);
-            event = "reservation_conflict";
+            const isCleaning = result.housekeepingStatus === "CLEANING";
+            response = error(
+              isCleaning ? "ROOM_UNDER_CLEANING" : "RESERVATION_CONFLICT",
+              isCleaning ? "This room is currently being serviced by housekeeping" : "This room is no longer available for the selected dates",
+              409
+            );
+            event = isCleaning ? "room_unavailable_cleaning" : "reservation_conflict";
             severity = "WARNING";
-            message = "Overlapping reservation was prevented";
+            message = isCleaning ? "Booking prevented due to active cleaning" : "Overlapping reservation was prevented";
           } else {
             response = json({ reservation: result.reservation, room: result.room }, 201);
             event = "reservation_held";
@@ -185,6 +228,34 @@ export function createStaySyncApp({
             severity = slowPayment ? "WARNING" : "INFO";
             message = slowPayment ? "Payment completed above demo latency threshold" : "Booking confirmation event requested";
           }
+        }
+      } else if (request.method === "POST" && /^\/api\/reservations\/[^/]+\/cancel$/.test(url.pathname)) {
+        const reservationId = url.pathname.split("/")[3];
+        const result = await store.cancelReservation(reservationId, {
+          userId: currentUser?.id ?? null,
+          role: currentUser?.role ?? "guest"
+        });
+
+        if (result.kind === "not_found") {
+          response = error("RESERVATION_NOT_FOUND", "The reservation does not exist", 404);
+          event = "cancel_reservation_missing";
+          severity = "WARNING";
+          message = "Cancellation referenced missing reservation";
+        } else if (result.kind === "forbidden") {
+          response = error("FORBIDDEN", "You do not have permission to cancel this reservation", 403);
+          event = "auth_unauthorized_access";
+          severity = "WARNING";
+          message = "Unauthorized cancellation attempt";
+        } else if (result.kind === "invalid_state") {
+          response = error("RESERVATION_NOT_CANCELLABLE", `Reservation in status ${result.currentStatus} cannot be cancelled`, 409);
+          event = "cancel_invalid_state";
+          severity = "WARNING";
+          message = "Cancellation attempted in terminal or checked-in state";
+        } else {
+          response = json({ reservation: result.reservation }, 200);
+          event = "reservation_cancelled";
+          severity = "INFO";
+          message = "Reservation successfully cancelled and room released";
         }
       } else if (request.method === "GET" && url.pathname === "/api/reservations") {
         component = "operations";

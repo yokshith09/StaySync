@@ -67,7 +67,7 @@ nav a:hover { color: var(--moss); }
 }
 
 .user-badge {
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: 4px;
   font-size: 0.72rem;
   font-weight: 700;
@@ -76,16 +76,8 @@ nav a:hover { color: var(--moss); }
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
-
-.user-badge.staff {
-  background: var(--ink);
-  color: var(--paper);
-}
-
-.user-badge.guest {
-  background: var(--moss);
-  color: var(--paper);
-}
+.user-badge.staff { background: var(--ink); color: var(--paper); }
+.user-badge.guest { background: var(--moss); color: var(--paper); }
 
 .mini-btn {
   width: auto;
@@ -97,8 +89,11 @@ nav a:hover { color: var(--moss); }
   border: 1px solid var(--ink);
   cursor: pointer;
   font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.mini-btn:hover {
+.mini-btn:hover, .mini-btn.active {
   background: var(--ink);
   color: var(--paper);
 }
@@ -258,7 +253,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .journey .kicker { color: #c9d3b8; }
 .journey p:not(.kicker):not(.reference) { max-width: 42rem; line-height: 1.6; color: #d9e0d3; }
 .journey button, .journey .button-link { background: var(--moss); width: auto; }
+.journey .button-link.secondary { background: transparent; border: 1px solid var(--paper); margin-left: 10px; }
 .journey .reference { color: #c9d3b8; margin: 24px 0 0; }
+
+.confirmed-actions {
+  display: flex;
+  gap: 12px;
+}
 
 .operations {
   margin-top: clamp(90px, 13vw, 170px);
@@ -279,6 +280,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   color: var(--ink);
   border: 1px solid var(--ink);
 }
+.quiet-button:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
 
 .desk-copy {
   max-width: 38rem;
@@ -294,23 +299,108 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .desk-lock p { color: var(--muted); line-height: 1.6; margin-bottom: 16px; }
 
-.operations-list {
-  border-top: 1px solid var(--line);
+.desk-content {
+  display: grid;
+  grid-template-columns: 0.9fr 1.1fr;
+  gap: 32px;
   margin-top: 36px;
 }
 
+.desk-subpanel {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  padding: 24px;
+}
+.desk-subpanel h3 {
+  font-size: 1.25rem;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.room-inventory {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.inventory-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+}
+.inventory-card .room-hotel { font-size: 0.75rem; color: var(--muted); }
+.status-indicator {
+  margin: 4px 0 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.status-indicator.ready { color: var(--moss); }
+.status-indicator.cleaning { color: var(--clay); }
+
+.inventory-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.operations-list {
+  display: flex;
+  flex-direction: column;
+}
+
 .reservation-row {
-  padding: 24px 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--line);
   display: flex;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
   align-items: center;
 }
-.reservation-row h3 { font-size: 1.5rem; margin: 0.22em 0; }
-.reservation-row p:not(.room-meta) { margin: 0; color: var(--muted); }
-.state { text-transform: capitalize; color: var(--moss); font-weight: 700; }
-.reservation-row button { width: auto; }
+.reservation-row h3 { font-size: 1.2rem; margin: 0.2em 0; }
+.reservation-row p:not(.room-meta) { margin: 0; color: var(--muted); font-size: 0.85rem; }
+.row-actions { display: flex; gap: 8px; }
+.row-actions button { width: auto; min-height: 38px; padding: 6px 12px; font-size: 0.8rem; }
+
+.state {
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+}
+.state.confirmed { color: var(--moss); }
+.state.held { color: #b8860b; }
+.state.cancelled { color: #903f32; text-decoration: line-through; }
+.state.checked_in { color: var(--ink); }
+
+.reservation-summary {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  padding: 24px;
+}
+.summary-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.reservation-buttons {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+}
+.reservation-buttons button { width: auto; font-size: 0.85rem; }
+.cancel-booking-btn {
+  background: transparent;
+  color: #903f32;
+  border: 1px solid #903f32;
+}
+.cancel-booking-btn:hover {
+  background: #903f32;
+  color: var(--paper);
+}
 
 .empty { color: var(--muted); padding: 28px 0; }
 
@@ -339,6 +429,138 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   color: var(--paper);
 }
 
+/* Modals */
+.hotel-modal {
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  padding: 32px;
+  width: 90%;
+  max-width: 480px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+}
+.hotel-modal::backdrop {
+  background: rgba(23, 52, 44, 0.5);
+  backdrop-filter: blur(2px);
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+}
+.close-btn {
+  background: transparent;
+  border: 0;
+  font-size: 1.6rem;
+  width: auto;
+  min-height: auto;
+  cursor: pointer;
+  padding: 0;
+  color: var(--ink);
+}
+.close-btn:hover { background: transparent; color: var(--clay); }
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.tab-btn {
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  cursor: pointer;
+  min-height: 40px;
+}
+.tab-btn.active {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 700;
+}
+
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.demo-quick-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 14px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.pill-btn {
+  width: auto;
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  cursor: pointer;
+}
+.pill-btn:hover { background: var(--line); }
+
+.modal-error {
+  color: #903f32;
+  font-size: 0.85rem;
+  margin-top: 14px;
+}
+
+/* Receipt Modal */
+.receipt-modal {
+  max-width: 580px;
+}
+.receipt-header {
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+.receipt-header h4 { font-size: 1.5rem; margin: 0; }
+.receipt-ref { font-family: monospace; font-size: 0.85rem; margin: 0; color: var(--clay); font-weight: 700; }
+.receipt-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+.receipt-details strong { text-transform: uppercase; font-size: 0.7rem; color: var(--muted); display: block; margin-bottom: 4px; }
+.receipt-details p { margin: 0; }
+.receipt-charges { padding: 18px 0; }
+.charge-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 0.88rem;
+}
+.charge-total {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0 0;
+  margin-top: 8px;
+  border-top: 1px solid var(--ink);
+  font-size: 1.15rem;
+}
+.receipt-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.receipt-footer button { width: auto; }
+
 footer {
   display: flex;
   justify-content: space-between;
@@ -360,7 +582,7 @@ footer {
   .site-header { grid-template-columns: 1fr; gap: 16px; }
   nav { justify-content: flex-start; }
   .auth-status { justify-content: flex-start; }
-  .hero, .booking-panel, .journey { grid-template-columns: 1fr; }
+  .hero, .booking-panel, .journey, .desk-content { grid-template-columns: 1fr; }
   .hero { padding-top: 70px; }
   .hero-note { gap: 18px; }
   .booking-panel { gap: 22px; }
