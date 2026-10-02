@@ -1,28 +1,64 @@
-# Spec: StaySync demo source
+# Spec: StaySync Demo Source Product
 
 ## Objective
 
-Build a hospitality booking and operations demo that produces safe, structured, GCP-deployable telemetry. First release: room search, reservation holds, simulated payment, confirmation, and staff state changes. Dashboard work is excluded until deployment evidence exists.
+Build a fashion e-commerce store, with full order management, that serves as the demo source
+product for Cognizant Hackathon Use Case 2 (GCP Application Log Monitoring, Resource Usage & Cost
+Optimization Platform). It produces genuine, structured, privacy-safe telemetry across Cloud Run,
+Cloud SQL, Pub/Sub, Cloud Logging and Cloud Monitoring.
+
+The Use Case 2 product document names an Order Management / E-commerce API as the demo application
+(sections 1, 7 and 9). This project implements exactly that.
+
+## Core capabilities
+
+1. **Catalogue** — fourteen clothing pieces across six categories, each with an illustrated
+   product plate. Search by name, description or SKU; filter by category; sold-out and withdrawn
+   products are excluded from the public listing.
+2. **Ordering** — server-side pricing, stock reserved under row locks, duplicate lines merged,
+   `409 INSUFFICIENT_STOCK` on contention and `409 PRODUCT_UNAVAILABLE` when staff withdrew an item.
+3. **Authentication & RBAC** — native `node:crypto` scrypt hashing, HttpOnly cookie sessions,
+   self-service registration, and `customer` vs `staff` authorization.
+4. **Payments** — simulated approval, provider rejection (502) and latency spike; every attempt
+   audited, including failures.
+5. **Idempotency** — `Idempotency-Key` on order creation and payment; replay returns the stored
+   response, key reuse with a different body is refused.
+6. **Fulfilment** — staff queue, `PAID → FULFILLED`, stock and availability control.
+7. **Asynchronous processing** — transactional outbox plus a standalone confirmation worker.
+8. **Telemetry contract** — single-line structured JSON, stable event names, correlation id, no PII.
+9. **Three-transport persistence** — Supabase over HTTPS (port 443), the Postgres driver over
+   5432 for Cloud SQL, or a zero-config in-memory store. All three share one interface, and the two
+   database transports share one implementation of the transactional logic via SQL functions.
+
+10. **Access control at the database** — RLS enabled with no policies, so only the server's secret
+   key reaches the tables; execute permission on the order functions revoked from `PUBLIC`.
+
+## Order lifecycle
+
+```
+PENDING ──pay──> PAID ──fulfil──> FULFILLED
+   │               │
+   └───cancel──────┴──> CANCELLED        (cancelling returns reserved stock)
+```
+
+Stock is reserved at `PENDING`, not at payment, which is what makes concurrent contention observable.
 
 ## Commands
 
-- Start: `node src/server.js`
-- Test: `node --test`
+- Start (in-memory): `npm start` — port 8081
+- Start (database over HTTPS or driver): `npm run dev`
+- Worker: `npm run worker` — port 8082
+- Tests: `npm test` — 33 tests
+- Migration: `npm run migrate`
+- Scenario: `npm run scenario -- <name>`
 
-## Structure
+## Boundaries & constraints
 
-`src/` application/API, `public/` guest UI, `test/` behavior tests, `database/` Cloud SQL schema, `tasks/` plan/checkpoints.
-
-## Testing and boundaries
-
-- Always: validate inputs, add a test for behavior, emit safe JSON telemetry, run tests before a commit.
-- Ask first: GCP resource creation, real integrations, new dependencies, schema changes after initial baseline.
-- Never: log secrets, payment data, guest PII, or build the monitoring dashboard in this repository phase.
-
-## Success criteria
-
-The local guest flow can search rooms, create one hold, reject an overlapping hold, and emit queryable structured logs.
-
-## Assumptions
-
-No authentication, real payment provider, email service, or real guest data in the hackathon demo.
+- **Always**: validate at the trust boundary, price orders server-side, emit structured telemetry,
+  hash passwords with salted scrypt, hold stock changes inside a transaction, escape values before
+  they reach `innerHTML`.
+- **Never**: log credentials, session tokens, payment instruments or personal data; trust a
+  client-supplied price; let a repeated request create a second order; send the Supabase secret key
+  to a browser.
+- **Monitoring scope**: the dashboard is Phase 2 and is built from real GCP inputs — Cloud Logging,
+  Cloud Monitoring and the Cloud Billing export to BigQuery. No mock dashboard lives in this app.

@@ -1,50 +1,96 @@
-# Google Cloud Build Pipeline for StaySync
-# Automates testing, container image build via Cloud Buildpacks, and deployment to Cloud Run
+# Google Cloud Build pipeline for StaySync.
+# Tests, builds with Cloud Buildpacks (no Dockerfile), then deploys the API and the worker.
+#
+# One-time setup before the first run:
+#   gcloud artifacts repositories create staysync --repository-format=docker --location=$_LOCATION
+#   gcloud secrets create staysync-database-url --data-file=-   # paste the DATABASE_URL, no trailing newline
+#   gcloud pubsub topics create order-events
+#   gcloud projects add-iam-policy-binding $PROJECT_ID \
+#     --member=serviceAccount:$PROJECT_NUMBER-compute@developer.gserviceaccount.com \
+#     --role=roles/secretmanager.secretAccessor
+#
+# Apply the schema once the instance exists (from a machine with Cloud SQL access):
+#   DATABASE_URL=... node database/migrate.js
 
 steps:
-  # Step 1: Run automated tests before any build or deploy
+  # Dependencies must exist before the tests run; src/store.js imports pg.
   - name: 'node:20-slim'
-    id: 'run-tests'
+    id: 'install'
+    entrypoint: 'npm'
+    args: ['ci']
+
+  - name: 'node:20-slim'
+    id: 'test'
     entrypoint: 'npm'
     args: ['test']
+    waitFor: ['install']
 
-  # Step 2: Build container image using Google Cloud Buildpacks (No Dockerfile required)
   - name: 'gcr.io/k8s-skaffold/pack'
-    id: 'build-image'
+    id: 'build'
     entrypoint: 'pack'
     args:
       - 'build'
-      - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/staysync/staysync-app:$COMMIT_SHA'
+      - '$_IMAGE'
       - '--builder=gcr.io/buildpacks/builder:google-22'
       - '--path=.'
+    waitFor: ['test']
 
-  # Step 3: Push image to Google Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
-    id: 'push-image'
-    args:
-      - 'push'
-      - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/staysync/staysync-app:$COMMIT_SHA'
+    id: 'push'
+    args: ['push', '$_IMAGE']
+    waitFor: ['build']
 
-  # Step 4: Deploy the API service to Google Cloud Run
+  # The API: public, talks to Cloud SQL over the mounted unix socket.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    id: 'deploy-api-cloud-run'
+    id: 'deploy-api'
     entrypoint: 'gcloud'
     args:
       - 'run'
       - 'deploy'
       - 'staysync-api'
-      - '--image=$_LOCATION-docker.pkg.dev/$PROJECT_ID/staysync/staysync-app:$COMMIT_SHA'
+      - '--image=$_IMAGE'
       - '--region=$_LOCATION'
       - '--platform=managed'
       - '--allow-unauthenticated'
       - '--port=8081'
+      - '--command=node'
+      - '--args=src/server.js'
       - '--set-env-vars=NODE_ENV=production'
+      - '--set-secrets=DATABASE_URL=staysync-database-url:latest'
+      - '--add-cloudsql-instances=$_CLOUDSQL_INSTANCE'
+      - '--min-instances=0'
+      - '--max-instances=4'
+    waitFor: ['push']
+
+  # The worker: private, reached by Pub/Sub push and also polling the outbox.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-worker'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'staysync-worker'
+      - '--image=$_IMAGE'
+      - '--region=$_LOCATION'
+      - '--platform=managed'
+      - '--no-allow-unauthenticated'
+      - '--port=8082'
+      - '--command=node'
+      - '--args=src/worker.js'
+      - '--set-env-vars=NODE_ENV=production'
+      - '--set-secrets=DATABASE_URL=staysync-database-url:latest'
+      - '--add-cloudsql-instances=$_CLOUDSQL_INSTANCE'
+      - '--min-instances=1'
+      - '--max-instances=2'
+    waitFor: ['push']
 
 substitutions:
   _LOCATION: 'us-central1'
+  _CLOUDSQL_INSTANCE: 'PROJECT:REGION:staysync-sql'
+  _IMAGE: '${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/staysync/staysync-app:${COMMIT_SHA}'
 
 images:
-  - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/staysync/staysync-app:$COMMIT_SHA'
+  - '$_IMAGE'
 
 options:
   logging: CLOUD_LOGGING_ONLY

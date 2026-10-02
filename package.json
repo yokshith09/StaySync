@@ -1,10 +1,15 @@
 {
-  "name": "staysync-demo",
+  "name": "staysync-orders",
   "private": true,
   "type": "module",
+  "engines": { "node": ">=20.6" },
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test"
+    "dev": "node --env-file=.env src/server.js",
+    "worker": "node --env-file=.env src/worker.js",
+    "migrate": "node --env-file=.env database/migrate.js",
+    "test": "node --test",
+    "scenario": "node --env-file=.env scripts/generate-scenarios.mjs"
   },
   "dependencies": {
     "pg": "^8.23.1"

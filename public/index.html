@@ -3,186 +3,148 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>StaySync | Hotel stays, considered</title>
+  <title>StaySync | Considered clothing</title>
+  <meta name="description" content="StaySync fashion store — an order management demo storefront.">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header class="site-header">
-    <div class="brand-group">
-      <a class="wordmark" href="#stay">STAY<span>SYNC</span></a>
-      <span class="property-tag">Harbor House</span>
-    </div>
-    <nav aria-label="Primary">
-      <a href="#stay">Find a stay</a>
-      <a href="#your-stay">Your stay</a>
-      <a href="#operations">Hotel desk</a>
-      <a href="#demo-lab">Demo lab</a>
-    </nav>
-    <div class="auth-status" id="auth-status">
-      <span id="user-badge" class="user-badge">Guest mode</span>
-      <button id="open-auth-btn" class="mini-btn">Sign In / Register</button>
-      <button id="sign-out-btn" class="mini-btn" hidden>Sign Out</button>
-    </div>
-  </header>
-
   <main>
-    <section class="hero" id="stay">
+    <section class="hero">
       <div>
-        <p class="kicker">A more considered way to arrive</p>
-        <h1>Stays with<br><em>room</em> to breathe.</h1>
-        <p class="intro">Explore fictional coastal rooms, hold your dates, and see the booking journey through to confirmation.</p>
+        <p class="kicker">Autumn / Winter</p>
+        <h1>Clothes made to<br><em>outlast</em> the season.</h1>
+        <p class="lede">A short, considered collection — outerwear, knitwear, shirting and the pieces
+          that go under them. Every order reserves real stock and runs through payment and fulfilment.</p>
       </div>
       <aside class="hero-note">
-        <p>01 / Harbor House</p>
-        <strong>Quiet rooms. Clear details. No rush.</strong>
-        <span>StaySync demo collection</span>
+        <p class="meta">01 / The collection</p>
+        <strong>Fourteen pieces. Honest stock counts. No restock promises.</strong>
+        <span class="meta">Stock is reserved the moment an order is placed</span>
       </aside>
     </section>
 
-    <section class="booking-panel" aria-labelledby="booking-title">
-      <div>
-        <p class="kicker">Plan your stay</p>
-        <h2 id="booking-title">Choose your dates</h2>
-      </div>
-      <form id="search">
-        <label>Check in<input name="checkIn" type="date" required></label>
-        <label>Check out<input name="checkOut" type="date" required></label>
-        <label>Guests
-          <select name="guests">
-            <option value="1">1 guest</option>
-            <option value="2" selected>2 guests</option>
-            <option value="3">3 guests</option>
-            <option value="4">4 guests</option>
-          </select>
-        </label>
-        <button type="submit">Search rooms</button>
-      </form>
+    <section class="filters" aria-label="Filter the collection">
+      <label for="search">Search
+        <input id="search" type="search" placeholder="Wool, silk, FW-KNIT-01…" autocomplete="off">
+      </label>
+      <div class="chip-row" id="categories" role="group" aria-label="Category"></div>
     </section>
 
-    <p class="status" id="status" role="status">Choose dates to check availability.</p>
-    <section class="room-list" id="rooms" aria-live="polite"></section>
-    <section class="journey" id="journey" hidden aria-live="polite"></section>
-
-    <section class="your-stay" id="your-stay">
-      <div class="section-heading">
-        <div>
-          <p class="kicker">Guest booking status</p>
-          <h2>Your stay</h2>
-        </div>
-        <button class="quiet-button" id="refresh-stay">Refresh status</button>
-      </div>
-      <div id="guest-reservation" class="empty">No active reservation yet. Select a room above to begin.</div>
-    </section>
-
-    <section class="operations" id="operations">
-      <div class="section-heading">
-        <div>
-          <p class="kicker">For the hotel team</p>
-          <h2>Today’s desk</h2>
-        </div>
-        <button class="quiet-button" id="refresh-ops">Refresh desk</button>
-      </div>
-      <p class="desk-copy">Review confirmed stays, complete guest arrivals, and control room housekeeping readiness.</p>
-      
-      <div id="desk-lock" class="desk-lock" hidden>
-        <p>Staff credentials required. Sign in as hotel staff to review the arrivals roster, check in guests, and manage room housekeeping.</p>
-        <button id="quick-staff-login" class="quiet-button">Sign in as Desk Staff (Alex Vance)</button>
-      </div>
-
-      <div id="desk-content" class="desk-content">
-        <div class="desk-subpanel">
-          <h3>Room Inventory & Housekeeping</h3>
-          <div id="room-inventory" class="room-inventory">Loading rooms...</div>
-        </div>
-
-        <div class="desk-subpanel">
-          <h3>Arrivals & Reservations</h3>
-          <div id="operations-list" class="operations-list">
-            <p class="empty">No reservations yet. Complete a guest booking above to populate the desk.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="demo-lab" id="demo-lab">
-      <div>
-        <p class="kicker">Development and demo only</p>
-        <h2>Scenario lab</h2>
-        <p>Generate controlled operational evidence. These actions validate Cloud Logging, security alerts, and Cloud Monitoring after deployment.</p>
-      </div>
-      <div class="scenario-actions">
-        <button data-scenario="payment_failure">Payment provider rejection (502)</button>
-        <button data-scenario="slow_payment">Slow payment (latency spike)</button>
-        <button data-scenario="database_timeout">Database timeout (503)</button>
-        <button data-scenario="traffic_burst">20-room search burst</button>
-        <button data-scenario="auth_failed">Failed login attempt (401)</button>
-        <button data-scenario="unauthorized_desk">Unauthorized desk query (403)</button>
-      </div>
-      <p id="scenario-result" role="status"></p>
-    </section>
+    <p class="notice" id="feedback"></p>
+    <p class="result-count meta" id="result-count" aria-live="polite"></p>
+    <section class="product-grid" id="grid"></section>
   </main>
 
-  <!-- Auth Dialog (Login / Register) -->
-  <dialog id="auth-dialog" class="hotel-modal">
-    <div class="modal-header">
-      <h3 id="auth-title">StaySync Account</h3>
-      <button type="button" class="close-btn" id="close-auth-btn">&times;</button>
-    </div>
-    <div class="auth-tabs">
-      <button type="button" class="tab-btn active" id="tab-login">Sign In</button>
-      <button type="button" class="tab-btn" id="tab-register">Create Account</button>
-    </div>
+  <script type="module">
+    import { api, money, esc, badge, addToCart, mountChrome, toast, notice, productImage } from "/shared.js";
 
-    <!-- Login Form -->
-    <form id="login-form" class="modal-form">
-      <label>Email address
-        <input name="email" type="email" required placeholder="sarah@example.com" value="staff@staysync.internal">
-      </label>
-      <label>Password
-        <input name="password" type="password" required value="DeskPass2026!">
-      </label>
-      <button type="submit" class="submit-btn">Sign In</button>
-      <div class="demo-quick-picks">
-        <span>Quick demo picks:</span>
-        <button type="button" id="quick-pick-staff" class="pill-btn">Staff (Alex Vance)</button>
-        <button type="button" id="quick-pick-guest" class="pill-btn">Guest (Sarah Jenkins)</button>
-      </div>
-    </form>
+    await mountChrome("index");
 
-    <!-- Register Form -->
-    <form id="register-form" class="modal-form" hidden>
-      <label>Full name
-        <input name="name" type="text" required placeholder="Elena Rostova">
-      </label>
-      <label>Email address
-        <input name="email" type="email" required placeholder="elena@example.com">
-      </label>
-      <label>Password (min 6 chars)
-        <input name="password" type="password" minlength="6" required placeholder="••••••••">
-      </label>
-      <button type="submit" class="submit-btn">Create Account</button>
-    </form>
-    <p id="auth-error" class="modal-error" role="alert" hidden></p>
-  </dialog>
+    const grid = document.querySelector("#grid");
+    const search = document.querySelector("#search");
+    const categoryRow = document.querySelector("#categories");
+    let activeCategory = null;
 
-  <!-- Voucher / Folio Receipt Dialog -->
-  <dialog id="receipt-dialog" class="hotel-modal receipt-modal">
-    <div class="modal-header">
-      <h3>StaySync Guest Folio</h3>
-      <button type="button" class="close-btn" id="close-receipt-btn">&times;</button>
-    </div>
-    <div id="receipt-content" class="receipt-content"></div>
-    <div class="receipt-footer">
-      <button type="button" class="quiet-button" onclick="window.print()">Print Folio</button>
-      <button type="button" id="dismiss-receipt-btn">Close</button>
-    </div>
-  </dialog>
+    function card(product) {
+      const low = product.stockQuantity > 0 && product.stockQuantity <= 5;
+      const soldOut = product.status !== "ACTIVE" || product.stockQuantity === 0;
+      const stockLabel = soldOut
+        ? badge("OUT_OF_STOCK")
+        : low
+        ? `<span class="badge" data-tone="low">Only ${product.stockQuantity} left</span>`
+        : `<span class="badge">${product.stockQuantity} in stock</span>`;
 
-  <footer>
-    <span>STAYSYNC / HOSPITALITY DEMO</span>
-    <span>Dual-Mode PostgreSQL & Cloud SQL Architecture · Scrypt Authentication</span>
-  </footer>
+      return `<article class="product-card">
+        <div class="product-figure">
+          <img src="${productImage(product.id)}" alt="${esc(product.name)}" loading="lazy" width="272" height="340"
+               onerror="this.closest('.product-figure').dataset.missing='true'; this.remove();">
+        </div>
+        <div class="product-body">
+          <p class="meta">${esc(product.category)} · ${esc(product.sku)}</p>
+          <h3>${esc(product.name)}</h3>
+          <p>${esc(product.description)}</p>
+          <div class="product-foot">
+            <span class="price">${money(product.unitPriceCents)}</span>
+            ${stockLabel}
+          </div>
+          <button class="btn-accent" data-add="${esc(product.id)}" ${soldOut ? "disabled" : ""}>
+            ${soldOut ? "Unavailable" : "Add to order"}
+          </button>
+        </div>
+      </article>`;
+    }
 
-  <script src="/app.js"></script>
+    const resultCount = document.querySelector("#result-count");
+
+    async function load() {
+      const params = new URLSearchParams();
+      if (search.value.trim()) params.set("q", search.value.trim());
+      if (activeCategory) params.set("category", activeCategory);
+
+      grid.dataset.loading = "true";
+      resultCount.textContent = "Loading the collection…";
+
+      const { ok, body, message } = await api(`/api/products?${params}`);
+      delete grid.dataset.loading;
+
+      if (!ok) {
+        grid.innerHTML = "";
+        resultCount.textContent = "";
+        return notice("#feedback", message ?? "The collection is unavailable.", "error");
+      }
+      notice("#feedback", "");
+
+      const count = body.products.length;
+      resultCount.textContent = count
+        ? `${count} ${count === 1 ? "piece" : "pieces"}${activeCategory ? ` in ${activeCategory}` : ""}`
+        : "";
+      grid.innerHTML = count
+        ? body.products.map(card).join("")
+        : `<div class="empty">Nothing matches that search. <button class="btn-quiet btn-small" id="reset-filters">Clear filters</button></div>`;
+    }
+
+    grid.addEventListener("click", async (event) => {
+      if (event.target.id !== "reset-filters") return;
+      search.value = "";
+      activeCategory = null;
+      await loadCategories();
+      await load();
+    });
+
+    async function loadCategories() {
+      const { ok, body } = await api("/api/categories");
+      if (!ok) return;
+      categoryRow.innerHTML = [{ value: null, label: "All" }, ...body.categories.map((c) => ({ value: c, label: c }))]
+        .map(
+          (c) =>
+            `<button class="chip" data-category="${esc(c.value ?? "")}" aria-pressed="${c.value === activeCategory}">${esc(c.label)}</button>`
+        )
+        .join("");
+    }
+
+    categoryRow.addEventListener("click", async (event) => {
+      const chip = event.target.closest("[data-category]");
+      if (!chip) return;
+      activeCategory = chip.dataset.category || null;
+      await loadCategories();
+      await load();
+    });
+
+    grid.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-add]");
+      if (!button) return;
+      addToCart(button.dataset.add);
+      toast("Added to your order.");
+    });
+
+    let debounce;
+    search.addEventListener("input", () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(load, 220);
+    });
+
+    await loadCategories();
+    await load();
+  </script>
 </body>
 </html>

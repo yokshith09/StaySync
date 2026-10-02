@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>StaySync | Sign in</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <section class="auth-layout">
+      <div>
+        <p class="kicker">Account</p>
+        <h1 id="auth-heading">Sign in to<br>place an order.</h1>
+        <p class="lede">Orders, order history and the fulfilment desk are tied to an account.
+          Your email address is your sign-in. Passwords are hashed with salted scrypt and never
+          stored or logged in readable form; the session lives in an HttpOnly cookie.</p>
+
+        <ul class="assurance">
+          <li>Salted <code>scrypt</code> hashing, constant-time comparison</li>
+          <li>Session cookie is HttpOnly — no token in browser storage</li>
+          <li>Five failed attempts locks an account for fifteen minutes</li>
+          <li>No password, token or email ever reaches the logs</li>
+        </ul>
+      </div>
+
+      <div class="panel">
+        <div class="tabs" role="tablist">
+          <button role="tab" id="tab-signin" aria-selected="true" aria-controls="form-signin">Sign in</button>
+          <button role="tab" id="tab-register" aria-selected="false" aria-controls="form-register">Create account</button>
+        </div>
+
+        <form id="form-signin" novalidate>
+          <label>Email address
+            <input name="email" type="email" required autocomplete="email"
+                   autocapitalize="off" spellcheck="false" placeholder="you@example.com">
+          </label>
+          <label>Password
+            <input name="password" type="password" required autocomplete="current-password">
+          </label>
+          <button class="btn-accent" type="submit" style="width:100%">Sign in</button>
+        </form>
+
+        <form id="form-register" hidden novalidate>
+          <label>Full name
+            <input name="name" type="text" required autocomplete="name" placeholder="Elena Rostova">
+          </label>
+          <label>Email address
+            <input name="email" type="email" required autocomplete="email"
+                   autocapitalize="off" spellcheck="false" placeholder="elena@example.com">
+          </label>
+          <label>Password
+            <input name="password" type="password" required minlength="8" autocomplete="new-password"
+                   aria-describedby="password-help">
+            <span class="field-help" id="password-help">At least 8 characters.</span>
+          </label>
+          <button class="btn-accent" type="submit" style="width:100%">Create account</button>
+        </form>
+
+        <p class="notice" id="feedback" role="alert"></p>
+
+        <details class="demo-accounts">
+          <summary>Seeded demo accounts</summary>
+          <p class="meta">Type these in above to sign in as the prepared accounts. They are ordinary
+            accounts with no special path through the login.</p>
+          <table class="credential-table">
+            <thead><tr><th>Role</th><th>Email</th><th>Password</th></tr></thead>
+            <tbody>
+              <tr><td>Customer</td><td><code>customer@staysync.internal</code></td><td><code>ShopPass2026!</code></td></tr>
+              <tr><td>Staff</td><td><code>staff@staysync.internal</code></td><td><code>DeskPass2026!</code></td></tr>
+            </tbody>
+          </table>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { api, mountChrome, notice, loadSession, isValidEmail } from "/shared.js";
+
+    const user = await mountChrome("signin");
+    const next = new URLSearchParams(location.search).get("next") || "/";
+    if (user) location.replace(next);
+
+    const signinForm = document.querySelector("#form-signin");
+    const registerForm = document.querySelector("#form-register");
+    const tabSignin = document.querySelector("#tab-signin");
+    const tabRegister = document.querySelector("#tab-register");
+    const heading = document.querySelector("#auth-heading");
+
+    function showTab(which) {
+      const signin = which === "signin";
+      tabSignin.setAttribute("aria-selected", String(signin));
+      tabRegister.setAttribute("aria-selected", String(!signin));
+      signinForm.hidden = !signin;
+      registerForm.hidden = signin;
+      heading.innerHTML = signin ? "Sign in to<br>place an order." : "Create an<br>account.";
+      notice("#feedback", "");
+      (signin ? signinForm : registerForm).querySelector("input").focus();
+    }
+
+    tabSignin.addEventListener("click", () => showTab("signin"));
+    tabRegister.addEventListener("click", () => showTab("register"));
+
+    /** Client-side checks mirror the server's, which remains the authority. */
+    function validate(fields, isRegister) {
+      if (isRegister && !fields.name?.trim()) return "Please enter your name.";
+      if (!isValidEmail(fields.email)) return "Please enter a valid email address.";
+      if (!fields.password) return "Please enter your password.";
+      if (isRegister && fields.password.length < 8) return "Passwords must be at least 8 characters.";
+      return null;
+    }
+
+    async function submit(form, path, isRegister) {
+      const fields = Object.fromEntries(new FormData(form));
+      const localError = validate(fields, isRegister);
+      if (localError) return notice("#feedback", localError, "error");
+
+      const button = form.querySelector("button[type=submit]");
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = "Working…";
+      notice("#feedback", "");
+
+      const { ok, response, body, message } = await api(path, { method: "POST", body: JSON.stringify(fields) });
+
+      if (ok) {
+        await loadSession({ force: true });
+        location.href = body.user.role === "staff" ? "/operations" : next;
+        return;
+      }
+
+      button.disabled = false;
+      button.textContent = original;
+
+      // 429 carries a lockout window worth stating plainly rather than as a generic failure.
+      const tone = response.status === 429 ? "info" : "error";
+      notice("#feedback", message ?? "That did not work. Please try again.", tone);
+      form.querySelector('input[name="password"]').value = "";
+    }
+
+    signinForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      submit(signinForm, "/api/auth/login", false);
+    });
+    registerForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      submit(registerForm, "/api/auth/register", true);
+    });
+  </script>
+</body>
+</html>

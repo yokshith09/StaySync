@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>StaySync | Your order</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <section class="page-head">
+      <div>
+        <p class="kicker">Checkout</p>
+        <h2>Your order</h2>
+      </div>
+      <a class="btn btn-quiet" href="/">Keep shopping</a>
+    </section>
+
+    <p class="notice" id="feedback"></p>
+
+    <section class="checkout-layout section">
+      <div id="lines"></div>
+
+      <aside class="panel sticky" id="summary" hidden>
+        <h3>Summary</h3>
+        <div id="summary-lines"></div>
+        <div class="summary-total"><span>Total</span><span id="total">—</span></div>
+
+        <div id="step-place">
+          <button class="btn-accent" id="place" style="width:100%">Place order</button>
+          <p class="meta" style="margin-top:10px">Stock is reserved when the order is created.</p>
+        </div>
+
+        <div id="step-pay" hidden>
+          <p class="meta">Order <span id="order-ref"></span> is pending payment</p>
+          <label style="margin-top:14px">Simulated payment outcome
+            <select id="scenario">
+              <option value="approved">Approved</option>
+              <option value="payment_failure">Provider rejects payment (502)</option>
+              <option value="slow_payment">Slow provider response (latency)</option>
+            </select>
+          </label>
+          <button class="btn-accent" id="pay" style="width:100%">Pay now</button>
+          <button class="btn-quiet btn-small" id="abandon" style="width:100%;margin-top:8px">Cancel this order</button>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script type="module">
+    import {
+      api, money, esc, mountChrome, notice, toast, thumb,
+      readCart, setCartQuantity, removeFromCart, clearCart, requireSession
+    } from "/shared.js";
+
+    const user = await mountChrome("cart");
+
+    const linesEl = document.querySelector("#lines");
+    const summaryEl = document.querySelector("#summary");
+    const summaryLines = document.querySelector("#summary-lines");
+    const totalEl = document.querySelector("#total");
+    const stepPlace = document.querySelector("#step-place");
+    const stepPay = document.querySelector("#step-pay");
+
+    let catalogue = new Map();
+    let pendingOrder = null;
+
+    async function loadCatalogue() {
+      const { ok, body } = await api("/api/products");
+      if (ok) catalogue = new Map(body.products.map((p) => [p.id, p]));
+    }
+
+    function render() {
+      const items = readCart()
+        .map((item) => ({ ...item, product: catalogue.get(item.productId) }))
+        .filter((item) => item.product);
+
+      if (items.length === 0) {
+        linesEl.innerHTML = `<div class="empty">Your order is empty. <a href="/">Browse the catalogue</a>.</div>`;
+        summaryEl.hidden = true;
+        return;
+      }
+
+      summaryEl.hidden = false;
+      linesEl.innerHTML = `<div class="row-list">${items
+        .map(
+          ({ product, quantity }) => `<div class="row">
+            <div class="row-lead">
+              ${thumb(product)}
+              <div class="row-main">
+                <p class="meta">${esc(product.category)} · ${esc(product.sku)}</p>
+                <h3>${esc(product.name)}</h3>
+                <p class="meta">${money(product.unitPriceCents)} each · ${product.stockQuantity} available</p>
+              </div>
+            </div>
+            <div class="row-actions">
+              <div class="qty">
+                <button data-step="-1" data-id="${esc(product.id)}" aria-label="Decrease quantity">&minus;</button>
+                <span>${quantity}</span>
+                <button data-step="1" data-id="${esc(product.id)}" aria-label="Increase quantity"
+                  ${quantity >= product.stockQuantity ? "disabled" : ""}>&plus;</button>
+              </div>
+              <span class="line-total">${money(product.unitPriceCents * quantity)}</span>
+              <button class="btn-danger btn-small" data-remove="${esc(product.id)}">Remove</button>
+            </div>
+          </div>`
+        )
+        .join("")}</div>`;
+
+      summaryLines.innerHTML = items
+        .map(
+          ({ product, quantity }) =>
+            `<div class="summary-line"><span>${esc(product.name)} &times; ${quantity}</span><span>${money(
+              product.unitPriceCents * quantity
+            )}</span></div>`
+        )
+        .join("");
+
+      totalEl.textContent = money(items.reduce((sum, i) => sum + i.product.unitPriceCents * i.quantity, 0));
+    }
+
+    linesEl.addEventListener("click", (event) => {
+      const stepper = event.target.closest("[data-step]");
+      const remover = event.target.closest("[data-remove]");
+      if (stepper) {
+        const current = readCart().find((i) => i.productId === stepper.dataset.id)?.quantity ?? 0;
+        setCartQuantity(stepper.dataset.id, current + Number(stepper.dataset.step));
+      } else if (remover) {
+        removeFromCart(remover.dataset.remove);
+      } else return;
+      render();
+    });
+
+    document.querySelector("#place").addEventListener("click", async (event) => {
+      if (!requireSession(user)) return;
+      const button = event.target;
+      button.disabled = true;
+      button.textContent = "Placing…";
+
+      const { ok, body, message } = await api("/api/orders", {
+        method: "POST",
+        // One key per attempt: a double click or a retried request cannot create two orders.
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify({ items: readCart() })
+      });
+
+      button.disabled = false;
+      button.textContent = "Place order";
+
+      if (!ok) return notice("#feedback", message ?? "The order could not be placed.", "error");
+
+      pendingOrder = body.order;
+      document.querySelector("#order-ref").textContent = pendingOrder.id.slice(0, 8).toUpperCase();
+      stepPlace.hidden = true;
+      stepPay.hidden = false;
+      notice("#feedback", "Order created and stock reserved. Choose a payment outcome to continue.", "success");
+      await loadCatalogue();
+      render();
+    });
+
+    document.querySelector("#pay").addEventListener("click", async (event) => {
+      const scenario = document.querySelector("#scenario").value;
+      const button = event.target;
+      button.disabled = true;
+      button.textContent = "Contacting provider…";
+
+      const headers = { "idempotency-key": crypto.randomUUID() };
+      if (scenario !== "approved") headers["x-demo-scenario"] = scenario;
+
+      const { ok, message } = await api("/api/payments", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ orderId: pendingOrder.id })
+      });
+
+      button.disabled = false;
+      button.textContent = "Pay now";
+
+      if (!ok) return notice("#feedback", message ?? "The payment was declined.", "error");
+
+      clearCart();
+      location.href = `/orders?paid=${pendingOrder.id}`;
+    });
+
+    document.querySelector("#abandon").addEventListener("click", async () => {
+      const { ok, message } = await api(`/api/orders/${pendingOrder.id}/cancel`, { method: "POST" });
+      if (!ok) return notice("#feedback", message ?? "The order could not be cancelled.", "error");
+      stepPay.hidden = true;
+      stepPlace.hidden = false;
+      pendingOrder = null;
+      toast("Order cancelled and stock released.");
+      await loadCatalogue();
+      render();
+    });
+
+    await loadCatalogue();
+    render();
+  </script>
+</body>
+</html>

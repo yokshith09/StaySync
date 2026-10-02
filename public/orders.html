@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>StaySync | Your orders</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <section class="page-head">
+      <div>
+        <p class="kicker">Account</p>
+        <h2>Your orders</h2>
+      </div>
+      <button class="btn-quiet" id="refresh">Refresh</button>
+    </section>
+
+    <p class="notice" id="feedback"></p>
+    <section class="section" id="list" aria-live="polite"></section>
+  </main>
+
+  <dialog id="receipt">
+    <div class="dialog-head">
+      <h3>Order receipt</h3>
+      <button class="btn-quiet btn-small" id="close-receipt" aria-label="Close">&times;</button>
+    </div>
+    <div class="dialog-body" id="receipt-body"></div>
+    <div class="dialog-foot">
+      <button class="btn-quiet" id="print-receipt">Print</button>
+      <button id="dismiss-receipt">Close</button>
+    </div>
+  </dialog>
+
+  <script type="module">
+    import { api, money, esc, badge, mountChrome, notice, toast, thumb, requireSession } from "/shared.js";
+
+    const user = await mountChrome("orders");
+    if (!requireSession(user)) throw new Error("redirecting to sign in");
+
+    const listEl = document.querySelector("#list");
+    const receipt = document.querySelector("#receipt");
+    let orders = [];
+
+    const justPaid = new URLSearchParams(location.search).get("paid");
+
+    function orderRow(order) {
+      const units = order.items.reduce((sum, i) => sum + i.quantity, 0);
+      const cancellable = order.status === "PENDING" || order.status === "PAID";
+
+      return `<div class="row">
+        <div class="row-main">
+          <p class="meta">${new Date(order.createdAt).toLocaleString()} · ${units} item${units === 1 ? "" : "s"}</p>
+          <h3>Order ${esc(order.id.slice(0, 8).toUpperCase())}</h3>
+          <p class="meta">${order.items.map((i) => `${esc(i.product.name)} &times; ${i.quantity}`).join(" · ")}</p>
+        </div>
+        <div class="row-actions">
+          ${badge(order.status)}
+          <span class="line-total">${money(order.totalCents)}</span>
+          ${order.status === "PENDING" ? `<button class="btn-accent btn-small" data-pay="${esc(order.id)}">Pay</button>` : ""}
+          <button class="btn-quiet btn-small" data-receipt="${esc(order.id)}">Receipt</button>
+          ${cancellable ? `<button class="btn-danger btn-small" data-cancel="${esc(order.id)}">Cancel</button>` : ""}
+        </div>
+      </div>`;
+    }
+
+    async function load() {
+      const { ok, body, message } = await api("/api/orders/my");
+      if (!ok) return notice("#feedback", message ?? "Your orders could not be loaded.", "error");
+      orders = body.orders;
+      listEl.innerHTML = orders.length
+        ? `<div class="row-list">${orders.map(orderRow).join("")}</div>`
+        : `<div class="empty">No orders yet. <a href="/">Browse the catalogue</a>.</div>`;
+    }
+
+    function showReceipt(order) {
+      document.querySelector("#receipt-body").innerHTML = `
+        <div class="receipt-grid">
+          <div><strong>Reference</strong><span>${esc(order.id.slice(0, 8).toUpperCase())}</span></div>
+          <div><strong>Status</strong><span>${badge(order.status)}</span></div>
+          <div><strong>Placed</strong><span>${new Date(order.createdAt).toLocaleString()}</span></div>
+          <div><strong>Account</strong><span>${esc(user.name)}</span></div>
+        </div>
+        <div>
+          ${order.items
+            .map(
+              (item) => `<div class="summary-line">
+                <span>${esc(item.product.name)} &times; ${item.quantity} @ ${money(item.unitPriceCents)}</span>
+                <span>${money(item.unitPriceCents * item.quantity)}</span>
+              </div>`
+            )
+            .join("")}
+          <div class="summary-total"><span>Total</span><span>${money(order.totalCents)}</span></div>
+        </div>
+        <p class="meta">No payment instrument details are collected or stored by this demo.</p>`;
+      receipt.showModal();
+    }
+
+    listEl.addEventListener("click", async (event) => {
+      const target = event.target.closest("[data-pay],[data-receipt],[data-cancel]");
+      if (!target) return;
+      const { pay, receipt: receiptId, cancel } = target.dataset;
+
+      if (receiptId) {
+        const order = orders.find((o) => o.id === receiptId);
+        if (order) showReceipt(order);
+        return;
+      }
+
+      if (pay) {
+        target.disabled = true;
+        const { ok, message } = await api("/api/payments", {
+          method: "POST",
+          headers: { "idempotency-key": crypto.randomUUID() },
+          body: JSON.stringify({ orderId: pay })
+        });
+        target.disabled = false;
+        if (!ok) return notice("#feedback", message ?? "The payment was declined.", "error");
+        toast("Payment approved.");
+      }
+
+      if (cancel) {
+        if (!confirm("Cancel this order? Reserved stock returns to the catalogue.")) return;
+        const { ok, message } = await api(`/api/orders/${cancel}/cancel`, { method: "POST" });
+        if (!ok) return notice("#feedback", message ?? "The order could not be cancelled.", "error");
+        toast("Order cancelled.");
+      }
+
+      notice("#feedback", "");
+      await load();
+    });
+
+    document.querySelector("#refresh").addEventListener("click", load);
+    document.querySelector("#close-receipt").addEventListener("click", () => receipt.close());
+    document.querySelector("#dismiss-receipt").addEventListener("click", () => receipt.close());
+    document.querySelector("#print-receipt").addEventListener("click", () => window.print());
+
+    await load();
+
+    if (justPaid) {
+      const order = orders.find((o) => o.id === justPaid);
+      notice("#feedback", "Payment approved. A confirmation event is queued for the worker.", "success");
+      if (order) showReceipt(order);
+      history.replaceState({}, "", "/orders");
+    }
+  </script>
+</body>
+</html>

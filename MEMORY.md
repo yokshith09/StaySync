@@ -1,262 +1,318 @@
-# StaySync Project Memory
+# StaySync — Master Project Memory & Full Context Reference
 
-Last updated: 2 October 2026
+**Last Updated:** 2 October 2026  
+**Repository Location:** `E:\StaySync`  
+**Git Branch:** `master`  
+**Runtime:** Node.js v20+ (ESM, zero external runtime dependencies, `pg` for PostgreSQL / Cloud SQL)  
+**Test Suite:** 33 passing automated tests (`node --test`)
 
-## Purpose of this memory
+---
 
-This file preserves the important decisions and current state from the project conversation. Read it before changing scope, rebuilding the demo source, deploying to GCP, or starting the future monitoring dashboard.
+## 1. Executive Context & Problem Statement
 
-## Final product decision
+### Cognizant Hackathon — Use Case 2: NPN GCP Track
+* **Title:** *GCP Application Log Monitoring, Resource Usage & Cost Optimization Platform*
+* **Document Reference:** Use Case 2 Product Document v1.0 (1 October 2026), sections 1, 7, 9, 13, 14, 15.
+* **Core Problem:** A cloud application generates large volumes of operational events. Critical errors can be buried in normal noise, performance bottlenecks go unnoticed, and cloud resource consumption runs decoupled from cloud spend.
+* **Solution Architecture:**
+  1. **Demo Source Application (StaySync):** A controlled fashion store with full order management, deployed on GCP, continuously generating structured operational logs, database transactions, queue activity, and load.
+  2. **GCP Centralized Logging:** Cloud Logging captures structured JSON entries.
+  3. **GCP Cloud Monitoring:** Gathers real-time infrastructure metrics (Cloud Run CPU/memory, Cloud SQL active backend connections, Pub/Sub lag).
+  4. **GCP Cloud Billing to BigQuery:** Ingests cost data at periodic cadence.
+  5. **Observability & Cost Platform (Phase 2):** Developer-facing dashboard surfacing error trends, threshold-based alerts, slow endpoint latency, resource spikes, and advisory cost-saving recommendations (right-sizing, idle cleanup).
 
-The chosen demo source product is **StaySync — Hotel Booking & Operations Platform**.
+### Role of StaySync in the Deliverable
+StaySync is the **controlled demo source application** specified in Section 7 of the Hackathon document. It is **not** the monitoring dashboard. It creates the authentic workload, concurrency contention, latency spikes, and failure scenarios that the Phase 2 monitoring dashboard ingests and evaluates.
 
-StaySync is not the monitoring dashboard. It is the realistic application that will be deployed to GCP to create the logs, errors, event activity, database use, and cloud-resource usage the monitoring dashboard will later analyze.
+The storefront is a fashion retailer: fourteen clothing pieces across Outerwear, Knitwear, Shirting, Trousers, Dresses and Accessories, each with an illustrated SVG product plate in `public/img/` drawn in the design-system palette. The imagery is deliberately illustrative rather than photographic so the catalogue carries no external image dependency or licensing question.
 
-### Why StaySync was chosen
+---
 
-- It feels like a real, understandable product rather than a purpose-built log generator.
-- Its guest and hotel-staff journeys naturally create meaningful operations signals.
-- It supports realistic incidents without real payments, personal data, or external customer communication.
-- It gives the later dashboard a strong story: protect bookings, payment reliability, confirmation processing, room availability, and hotel operations.
-
-## Superseded direction
-
-An earlier CommerceOps/order-management source application and an early monitoring-dashboard shell were built. The user decided this direction was not compelling enough as the source product.
-
-- CommerceOps is superseded by StaySync.
-- The early dashboard is superseded; do not revive it.
-- Do not build the monitoring dashboard while StaySync is still local-only.
-
-## Mandatory delivery sequence
-
-1. Build and test StaySync locally.
-2. Deploy StaySync to GCP.
-3. Verify real logs in GCP Cloud Logging and real resource signals in Cloud Monitoring.
-4. Run repeatable operational scenarios and save evidence/query results.
-5. Only then design and build the monitoring dashboard from verified inputs.
-
-This sequence is intentional. The dashboard must use actual GCP source data rather than invented fixture data.
-
-## Product scope
-
-### In scope now
-
-- Guest room search by dates and guest count.
-- Room availability based on fictional hotel/room data.
-- Reservation holds with overlap conflict prevention.
-- Simulated payment approval, provider rejection, and delayed response.
-- Booking confirmation-event request.
-- Hotel desk with reservations and guest check-in.
-- Demo-only scenario controls and scripts.
-- Safe structured JSON logs for meaningful API requests/events.
-
-### Deliberately out of scope now
-
-- Monitoring dashboard, alert dashboard, cost dashboard, or fake operational charts.
-- Real payment processing, payment-card collection, email/SMS delivery, customer authentication, and real hotels/guests.
-- Production compliance, multi-tenancy, or broad enterprise scope.
-
-## Current implementation
-
-Location: `E:\StaySync`
-
-### Useful folders/files
-
-| Path | Purpose |
-|---|---|
-| `src/app.js` | API routes, error semantics, and structured logging. |
-| `src/store.js` | Local in-memory hotel, room, reservation, payment, and operations state. |
-| `src/server.js` | Local HTTP server; starts on port 8081 by default. |
-| `public/` | Guest booking interface, hotel desk, your-stay section, and demo lab. |
-| `test/app.test.js` | Automated behavior tests. |
-| `scripts/generate-scenarios.mjs` | CLI generator for traffic-burst and database-timeout scenarios. |
-| `tasks/` | Active build plan and checkpoints. |
-| `docs/` | Seven current project documents. |
-| `SPEC.md` | Current source-product specification. |
-| `DESIGN.md` | StaySync design system. |
-
-### Current guest/staff flow
+## 2. Complete Architecture & System Flow
 
 ```text
-Search rooms → Hold a room → Choose simulated payment outcome
-  → Confirmation requested on approved payment → Hotel desk → Check in guest
+               Customer & Staff Web UI (6 pages, Vanilla HTML5 / CSS3 / ES Modules)
+                                         │
+                                         ▼
+                     Cloud Run: StaySync Order API (Node.js 20+)
+                                         │
+                 ┌───────────────────────┴───────────────────────┐
+                 │                                               │
+                 ▼                                               ▼
+     Cloud SQL for PostgreSQL                          Pub/Sub Topic
+     (users, sessions, products, orders,      (order.confirmation.requested,
+      order_items, payment_attempts,                 order.cancelled)
+      outbox_events, idempotency_records)                        │
+                 │                                               ▼
+                 │                                    Cloud Run: Confirmation Worker
+                 │                                               │
+                 └───────────────────────┬───────────────────────┘
+                                         │
+                                         ▼
+                 ┌───────────────────────────────────────────────┐
+                 │       GCP OBSERVABILITY & TELEMETRY           │
+                 │  • Cloud Logging: structured jsonPayload      │
+                 │  • Cloud Monitoring: Cloud Run & DB metrics   │
+                 │  • Cloud Billing: BigQuery export             │
+                 └───────────────────────────────────────────────┘
 ```
 
-### Current API surface
+---
 
-- `GET /health`
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `POST /api/auth/logout`
-- `GET /api/auth/me`
-- `GET /api/rooms?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD&guests=number`
-- `GET /api/rooms/all` (protected: staff role required)
-- `POST /api/reservations`
-- `POST /api/reservations/:id/cancel` (protected: guest owner or staff role)
-- `POST /api/payments`
-- `GET /api/reservations` (protected: staff role required)
-- `GET /api/reservations/my` (protected: active session required)
-- `PATCH /api/reservations/:id/check-in` (protected: staff role required)
-- `PATCH /api/rooms/:id/housekeeping` (protected: staff role required)
-- `POST /pubsub/confirmations` (worker push endpoint)
+## 3. Technology Stack & Design Decisions
 
-All error responses use this shape:
+* **Language & Runtime:** Pure Node.js (ESM). No bulky web frameworks (Express/Fastify) — uses Web-standard `fetch`, `Request`, and `Response` with `node:http`.
+* **Security & Auth:** Zero external crypto libraries (no bcrypt, no jsonwebtoken). Uses native `node:crypto`:
+  * Password hashing via `crypto.scryptSync` with cryptographic salt.
+  * Constant-time verification with `crypto.timingSafeEqual`, length-guarded so a malformed stored hash yields 401 rather than 500.
+  * Session management via HttpOnly cookies carrying SHA-256 hashed bearer tokens. No token in browser storage.
+  * Email is the sign-in identifier: trimmed, lowercased and format-validated on both registration and login.
+  * **Failed-login throttle:** five failures for one address within 15 minutes returns `429 TOO_MANY_ATTEMPTS` with `Retry-After`, refused *before* the store is consulted. Success clears the counter; the lockout is per address, not global. In-process `Map`, so on Cloud Run the effective limit is attempts x instances — ceiling noted in code.
+  * **Email domain verification at registration:** the domain must publish an MX record, or an A record per RFC 5321 §5.1, before an account is created. This rejects fabricated domains without needing a mail provider or a confirmation email. It proves the domain is real, *not* that the specific mailbox exists — a typo inside a real provider (`dusername@gmail.com`) still gets through. Injectable via `createStaySyncApp({ checkEmailDomain })` so the test suite never touches DNS.
+  * **No login bypass exists anywhere.** The sign-in form has no prefilled credentials and no one-click fill; the scenario lab holds no credentials and never authenticates on the user's behalf.
+* **Database Layer:** Three transports behind one interface in `src/store.js`, selected by `getStore()`:
+  * **Supabase PostgREST (HTTPS, port 443):** the local default. Chosen when `SUPABASE_URL` + `SUPABASE_SECRET_KEY` are set, and takes precedence, because this network blocks outbound 5432.
+  * **PostgreSQL / Cloud SQL (`pg` driver, port 5432):** chosen when `DATABASE_URL` is set. The GCP deployment path.
+  * **In-Memory Store:** chosen when neither is set. Zero-config testing (`npm test` passes in ~2 seconds without a database).
+* **Transactional Logic in SQL:** PostgREST cannot hold a transaction across HTTP requests, so it cannot run `BEGIN / SELECT FOR UPDATE / COMMIT`. The four transactional operations therefore live in database functions (`database/functions.sql`) — `create_order`, `pay_order`, `cancel_order`, `fulfil_order` — and **both** database transports call them. One implementation, identical locking guarantees. `search_path` is pinned on all four.
+* **Hosted Database:** Supabase Postgres 17 (`staysync-orders`, `ap-south-1`) with a least-privilege `staysync_app` role for the driver path.
+* **Access Control:** RLS enabled on all eight tables with **no policies**, so the publishable/anon key reaches nothing; `EXECUTE` on the order functions revoked from `PUBLIC`. The server holds the secret (service_role) key, which bypasses RLS and is never sent to a browser.
+* **CI/CD Pipeline:** `cloudbuild.yaml` automated via **Google Cloud Buildpacks** (`gcr.io/buildpacks/builder:google-22`). No Dockerfile needed; builds, tests, and deploys both API and Worker services.
+
+---
+
+## 4. Complete Data Model (PostgreSQL / Cloud SQL)
+
+Managed via `database/schema.sql` and `database/migrate.js`:
+
+```text
+users 1 ──< sessions
+users 1 ──< orders 1 ──< order_items >── 1 products
+orders 1 ──< payment_attempts
+outbox_events (aggregate_id → orders.id)
+idempotency_records (key = client Idempotency-Key)
+```
+
+| Table | Primary Key | Key Columns | Purpose & Constraints |
+|---|---|---|---|
+| **`users`** | `id` (VARCHAR) | `email` (UNIQUE), `password_hash`, `salt`, `role`, `full_name`, `created_at` | Account store. Roles: `customer` or `staff`. |
+| **`sessions`** | `id` (VARCHAR) | `user_id` (FK), `token_hash` (UNIQUE), `expires_at`, `created_at` | Active sessions. Stored as SHA-256 hashes of tokens. |
+| **`products`** | `id` (VARCHAR) | `sku` (UNIQUE), `name`, `description`, `category`, `unit_price_cents`, `stock_quantity`, `status` | Catalogue. `stock_quantity >= 0`; `status`: `ACTIVE` or `OUT_OF_STOCK`. |
+| **`orders`** | `id` (VARCHAR) | `user_id` (FK), `status`, `total_cents`, `created_at`, `updated_at` | Lifecycle: `PENDING → PAID → FULFILLED`, or `CANCELLED`. Priced server-side. |
+| **`order_items`**| `id` (VARCHAR) | `order_id` (FK), `product_id` (FK), `quantity`, `unit_price_cents` | Order line items with price snapshot. |
+| **`payment_attempts`**| `id` (VARCHAR)| `order_id` (FK), `status`, `amount_cents`, `provider_reference`, `created_at` | Audit of all attempts (`APPROVED`, `FAILED`). No card details. |
+| **`outbox_events`** | `id` (VARCHAR) | `event_type`, `aggregate_id`, `payload` (JSONB), `published_at`, `created_at` | Transactional outbox decoupling API from Pub/Sub. |
+| **`idempotency_records`**| `key` (VARCHAR)| `request_hash`, `response_status`, `response_body` (JSONB), `created_at` | Deduplication store for `Idempotency-Key`. |
+
+---
+
+## 5. Complete API Surface (All Endpoints)
+
+All error responses strictly adhere to `{ "error": { "code": "STRING", "message": "String" } }`.
+
+### 1. Platform & Health
+* `GET /health`: Pings storage dependency. Returns `200 healthy` or `503 degraded` with dependency details.
+
+### 2. Authentication
+* `POST /api/auth/register`: `{ name, email, password }` → Creates customer account, issues session cookie.
+* `POST /api/auth/login`: `{ email, password }` → Authenticates, returns user profile, sets HttpOnly session cookie.
+* `POST /api/auth/logout`: Revokes active session.
+* `GET /api/auth/me`: Returns profile of authenticated session or 401.
+
+### 3. Product Catalogue
+* `GET /api/products?q=&category=`: Public listing of active, in-stock products. Supports `x-demo-scenario: database_timeout` (503).
+* `GET /api/categories`: Returns distinct product categories.
+* `GET /api/products/all`: *[Staff Only]* Full inventory including withdrawn and out-of-stock items.
+* `PATCH /api/products/:id/stock`: *[Staff Only]* `{ stockQuantity, status }`. Updates inventory and availability.
+
+### 4. Orders & Checkout
+* `POST /api/orders`: *[Active Session]* `{ items: [{ productId, quantity }] }`. Supports `Idempotency-Key`. Server prices items and atomically reserves stock under row lock (`SELECT ... FOR UPDATE`).
+* `GET /api/orders/my`: *[Active Session]* Returns order history of current user.
+* `GET /api/orders/:id`: *[Owner or Staff]* Returns itemized order details.
+* `POST /api/orders/:id/cancel`: *[Owner or Staff]* Cancels order, restoring reserved stock to inventory.
+* `GET /api/orders`: *[Staff Only]* Fulfilment desk queue across all customers.
+* `PATCH /api/orders/:id/fulfil`: *[Staff Only]* Advances status from `PAID` to `FULFILLED`.
+
+### 5. Payments
+* `POST /api/payments`: *[Owner or Staff]* `{ orderId }`. Supports `Idempotency-Key` and `x-demo-scenario: payment_failure | slow_payment`. Records audit record, confirms payment, and stages outbox confirmation event.
+
+### 6. Pub/Sub Confirmation Worker
+* `POST /pubsub/confirmations`: Pub/Sub push receiver processing outbox events (`order.confirmation.requested`, `order.cancelled`).
+
+---
+
+## 6. Structured Logging & Telemetry Contract
+
+Every request writes exactly one JSON string to `stdout`. Cloud Run automatically transforms this into structured `jsonPayload` in GCP Cloud Logging:
 
 ```json
-{ "error": { "code": "MACHINE_READABLE_CODE", "message": "Safe explanation" } }
+{
+  "timestamp": "2026-10-02T08:20:00.123Z",
+  "severity": "INFO | WARNING | ERROR",
+  "event": "stable_event_name",
+  "component": "platform | auth | catalog | orders | payments | operations | confirmation-worker",
+  "entryPoint": "http | pubsub | poller",
+  "requestId": "uuid",
+  "route": "/api/...",
+  "statusCode": 200,
+  "responseTimeMs": 14,
+  "environment": "development | production",
+  "message": "Safe diagnostic summary"
+}
 ```
 
-## Operational scenarios and expected evidence
+### Complete Telemetry Catalog
 
-| Scenario | Trigger | HTTP outcome | Structured event | Severity |
+Every event name the application can emit. The Phase 2 dashboard is built against this list, so it
+is kept exhaustive — the `ERROR` and `WARNING` rows are the ones alert thresholds attach to.
+
+**Platform**
+
+| Event Name | Component | Severity | HTTP | Trigger Scenario |
 |---|---|---|---|---|
-| Normal room search | Guest search | `200` | `room_search_completed` | `INFO` |
-| Reservation hold | Select room | `201` | `reservation_held` | `INFO` |
-| Overlap conflict | Hold same room/dates twice | `409` | `reservation_conflict` | `WARNING` |
-| Cleaning lock | Hold room currently under cleaning | `409` | `room_unavailable_cleaning` | `WARNING` |
-| Reservation cancellation | Guest/staff cancels booking | `200` | `reservation_cancelled` | `INFO` |
-| Invalid search/reservation | Bad or missing input | `422` | `room_search_invalid` / `reservation_invalid` | `WARNING` |
-| Capacity conflict | Guest count exceeds room capacity | `409` | `reservation_capacity_conflict` | `WARNING` |
-| Payment rejection | Demo payment outcome: provider rejects payment | `502` | `payment_provider_rejected` | `ERROR` |
-| Slow payment | Demo payment outcome: slow provider response | `201` | `payment_slow` | `WARNING` |
-| Availability database timeout | Demo Lab or request scenario header | `503` | `database_timeout` | `ERROR` |
-| Invalid check-in | Check in non-confirmed booking | `409` | `check_in_invalid_state` | `WARNING` |
-| Traffic burst | Demo Lab or CLI script | repeated `200` | `room_search_completed` | `INFO` |
-| Guest registration | Create new guest account | `201` | `auth_register_success` | `INFO` |
-| Duplicate email | Register with existing email | `409` | `auth_register_duplicate` | `WARNING` |
-| Failed login | Invalid credentials in login | `401` | `auth_login_failed` | `WARNING` |
-| Unauthorized desk access | Guest / unauthenticated query to desk | `403` | `auth_unauthorized_access` | `WARNING` |
-| Confirmation dispatched | Worker outbox processing | `200` | `confirmation_sent` | `INFO` |
+| `health_checked` | `platform` | `INFO` | `200` | Regular health check ping |
+| `health_degraded` | `platform` | `ERROR` | `503` | Database dependency unreachable |
+| `route_not_found` | `platform` | `WARNING` | `404` | Unknown route |
+| `unhandled_server_error` | `platform` | `ERROR` | `500` | Uncaught error in the HTTP adapter |
 
-### Logging contract
+**Authentication**
 
-Each meaningful event is emitted as one JSON stdout record. Required fields:
+| Event Name | Component | Severity | HTTP | Trigger Scenario |
+|---|---|---|---|---|
+| `auth_register_success` | `auth` | `INFO` | `201` | Customer signs up |
+| `auth_register_duplicate` | `auth` | `WARNING` | `409` | Email already exists |
+| `auth_register_invalid` | `auth` | `WARNING` | `422` | Bad email or password under 8 chars |
+| `auth_login_success` | `auth` | `INFO` | `200` | Valid sign in |
+| `auth_login_failed` | `auth` | `WARNING` | `401` | Wrong password or unknown user |
+| `auth_rate_limited` | `auth` | `WARNING` | `429` | Six+ failed sign-ins for one address in 15 min |
+| `auth_login_invalid` | `auth` | `WARNING` | `422` | Missing email or password |
+| `auth_logout` | `auth` | `INFO` | `200` | Session revoked |
+| `auth_profile_viewed` | `auth` | `INFO` | `200` | Session validated |
+| `auth_unauthenticated` | `auth`/`orders` | `INFO`/`WARNING` | `401` | Action attempted without a session |
+| `auth_unauthorized_access`| `operations`/`orders`| `WARNING` | `403` | Role or ownership check refused |
 
-`timestamp`, `severity`, `event`, `component`, `entryPoint`, `requestId`, `route`, `statusCode`, `responseTimeMs`, `environment`, and safe `message`.
+**Catalogue**
 
-Never log names, emails, payment details, passwords, access tokens, secrets, or raw request bodies.
+| Event Name | Component | Severity | HTTP | Trigger Scenario |
+|---|---|---|---|---|
+| `product_catalog_listed` | `catalog` | `INFO` | `200` | Browsing shop or traffic burst |
+| `product_categories_listed` | `catalog` | `INFO` | `200` | Category chips loaded |
+| `product_inventory_listed` | `operations` | `INFO` | `200` | Staff opens full inventory |
+| `product_stock_updated` | `operations` | `INFO` | `200` | Staff adjusts stock or availability |
+| `product_stock_invalid` | `operations` | `WARNING` | `422` | Negative stock or bad status value |
+| `product_stock_missing` | `operations` | `WARNING` | `404` | Stock update on an unknown product |
+| `database_timeout` | `catalog` | `ERROR` | `503` | `x-demo-scenario: database_timeout` |
 
-### Verified local logs
+**Orders**
 
-The following were run and observed locally:
+| Event Name | Component | Severity | HTTP | Trigger Scenario |
+|---|---|---|---|---|
+| `order_created` | `orders` | `INFO` | `201` | Order placed, stock reserved |
+| `order_stock_conflict` | `orders` | `WARNING` | `409` | Stock contention on the last units |
+| `product_unavailable` | `orders` | `WARNING` | `409` | Ordering a staff-withdrawn product |
+| `order_invalid` | `orders` | `WARNING` | `422` | Malformed or empty item list |
+| `order_product_missing` | `orders` | `WARNING` | `404` | Item references an unknown product |
+| `order_viewed` | `orders` | `INFO` | `200` | Single order retrieved |
+| `order_history_retrieved` | `orders` | `INFO` | `200` | Customer opens order history |
+| `order_not_found` | `orders` | `WARNING` | `404` | Lookup, payment or cancel on an unknown order |
+| `order_cancelled` | `orders` | `INFO` | `200` | Order cancelled, stock returned |
+| `order_cancel_invalid_state` | `orders` | `WARNING` | `409` | Cancel attempted on a terminal order |
+| `orders_listed` | `operations` | `INFO` | `200` | Staff opens the fulfilment queue |
+| `order_fulfilled` | `operations` | `INFO` | `200` | Staff marks an order fulfilled |
+| `order_fulfil_invalid_state` | `operations` | `WARNING` | `409` | Fulfil attempted on an unpaid order |
 
-- `payment_provider_rejected` with `ERROR`, route `/api/payments`, status `502`.
-- `database_timeout` with `ERROR`, route `/api/rooms`, status `503`.
-- `payment_slow` with `WARNING` and observed response time of about 131 ms.
-- `auth_login_success` and `auth_login_failed` with `WARNING` and 401 status.
-- `auth_register_success` and `auth_register_duplicate` with `WARNING` and 409 status.
-- `auth_unauthorized_access` with `WARNING` and 403 status.
-- `reservation_cancelled` with `INFO` and 200 status.
-- `room_unavailable_cleaning` with `WARNING` and 409 status.
-- `confirmation_sent` emitted by confirmation-worker with `INFO`.
+**Payments & idempotency**
 
-## Testing and local run commands
+| Event Name | Component | Severity | HTTP | Trigger Scenario |
+|---|---|---|---|---|
+| `payment_approved` | `payments` | `INFO` | `201` | Order paid, outbox staged |
+| `payment_provider_rejected`| `payments` | `ERROR` | `502` | `x-demo-scenario: payment_failure` |
+| `payment_slow` | `payments` | `WARNING` | `201` | `x-demo-scenario: slow_payment` (>100ms) |
+| `payment_invalid` | `payments` | `WARNING` | `422` | Missing `orderId` |
+| `payment_invalid_state` | `payments` | `WARNING` | `409` | Order already paid or cancelled |
+| `idempotent_replay` | `orders` | `INFO` | stored | Repeat request with a known `Idempotency-Key` |
+| `idempotency_key_conflict` | `orders` | `WARNING` | `422` | Key reused with a different body |
 
+**Worker**
+
+| Event Name | Component | Severity | HTTP | Trigger Scenario |
+|---|---|---|---|---|
+| `confirmation_sent` | `confirmation-worker`| `INFO` | `200` | Confirmation dispatched |
+| `cancellation_notice_sent` | `confirmation-worker`| `INFO` | `200` | Cancellation notice dispatched |
+| `confirmation_retry_scheduled` | `confirmation-worker`| `WARNING` | `202` | Downstream delay; row left unpublished |
+| `outbox_poll_failed` | `confirmation-worker`| `ERROR` | `500` | Poller could not reach the database |
+
+---
+
+## 7. Web Application Pages (`public/`)
+
+1. **Shop (`/`)**: Fashion catalogue with product plates, live search, category filtering, stock badges, and add-to-cart.
+2. **Sign In (`/signin`)**: Unified sign-in and registration with quick demo-account buttons.
+3. **Your Order (`/cart`)**: Review lines, server-side preview totals, place order, and simulate payments.
+4. **Your Orders (`/orders`)**: Customer order history, printable itemized receipt, pay or cancel.
+5. **Fulfilment Desk (`/operations`)**: Staff-only order queue, status progression, and stock quantity/availability controls.
+6. **Scenario Lab (`/scenarios`)**: Interactive UI for running 14 controlled diagnostic scenarios. It holds **no credentials and performs no sign-in of its own** — scenarios that place real orders refuse to run unless a real session already exists. There is no login bypass anywhere in the application.
+
+---
+
+## 8. Verification & Test Suite
+
+All 33 tests pass with zero configuration:
 ```powershell
-cd E:\StaySync
-node --test
-node src/server.js
+npm test
 ```
 
-Open `http://localhost:8081` for the current app.
+### Coverage (30/33 passing):
+* Catalogue filtering, sold-out product hiding, search matching.
+* Server-side pricing integrity and atomic stock reservation under row lock.
+* Duplicate line merging preventing overselling past stock limits.
+* Stock contention rejection (`409 INSUFFICIENT_STOCK`).
+* Staff product withdrawal enforcement (`409 PRODUCT_UNAVAILABLE`).
+* Cross-customer order privacy protection (403 Forbidden).
+* Payment approval, 502 provider failure audit, and latency spike diagnostics.
+* Double-payment prevention.
+* Idempotency replay with identical response and reuse rejection with 422.
+* Order cancellation with atomic inventory return.
+* Role-based fulfilment queue access and state progression (`PAID → FULFILLED`).
+* Scrypt authentication, session management, and duplicate registration handling.
+* Health check reporting storage engine and degraded dependency detection.
+* Outbox drain and confirmation worker dispatch telemetry.
+* Zero-credential log leakage assertion across all events.
+* Product image coverage: every seeded product has an SVG plate.
+* Transport selection: HTTPS over driver over memory, with a half-configured Supabase falling through.
+* Login throttle: lockout after five failures, correct password still refused while locked, per-address isolation, window expiry, and counter reset on success.
+* Email normalisation: registration lowercases and trims; sign-in accepts any case or surrounding whitespace.
 
-Current test status at the time of this memory: **12 tests passing**.
+---
 
-## GCP target architecture (not deployed yet)
+## 9. Known Local Environment Constraint
 
-```text
-Guest/Staff Web UI
-       ↓
-Cloud Run: StaySync Booking API → Cloud SQL for PostgreSQL
-       ↓ booking confirmation event
-Pub/Sub
-       ↓
-Cloud Run: Confirmation Worker
-       ↓
-Cloud Logging and Cloud Monitoring
-       ↓
-Later: StaySync operations monitoring dashboard
+* **Network Restriction:** Outbound TCP on ports 5432 and 6543 is blocked on this local development machine. Verified against three Supabase regions; port 443 succeeds.
+* **Resolution:** the Supabase PostgREST transport exists precisely for this and is the local default. The whole store was driven against the live database over 443 and verified before RLS was enabled.
+* **Impact:** `npm start` (in-memory) and `npm test` (33 tests) run with zero issues. The `pg` driver path cannot reach a hosted database from here; it remains the Cloud SQL route and its SQL was validated directly against the live schema.
+* **Cloud Run:** unaffected — it reaches Cloud SQL over the Auth Proxy unix socket.
+
+### Setup step: complete
+
+`SUPABASE_SECRET_KEY` is set in `.env`. Verified 2026-10-02: `npm run dev` reports `storage: "supabase_rest"`; a full register/logout/re-login cycle was driven against the live server and the account row was confirmed in the Supabase `users` table by direct query, then cleaned up.
+
+---
+
+## 10. Delivery Roadmap: Phase 2 (Observability Platform)
+
+```
+[ StaySync Demo Source Product ] ──> [ GCP Deployment Gate ] ──> [ Monitoring & Cost Platform ]
 ```
 
-### GCP decisions
+### Stage 1: GCP Deployment Gate (Next Immediate Work)
+1. Deploy `staysync-api` to Cloud Run using `cloudbuild.yaml`.
+2. Provision Cloud SQL for PostgreSQL and apply `database/schema.sql` via `node database/migrate.js`.
+3. Deploy `staysync-worker` to Cloud Run subscribed to the Pub/Sub topic.
+4. Run Scenario Lab scripts against the live Cloud Run endpoint and confirm structured logs arrive in **GCP Cloud Logging**.
 
-- Cloud Run: host the Booking API and later the confirmation worker.
-- Cloud SQL for PostgreSQL: persistent hotels, rooms, reservations, payment attempts, operation state, and idempotency records.
-- Pub/Sub: decouple confirmation request from confirmation worker processing.
-- Secret Manager: database credentials; never put them in source code or ordinary configuration.
-- Cloud Logging: central source of structured application logs.
-- Cloud Monitoring: Cloud Run, Cloud SQL, and Pub/Sub resource/activity signals.
-- Billing export to BigQuery: later cost context only; it is not real-time telemetry.
-
-### Important GCP accuracy notes
-
-- Cloud Run captures stdout/stderr logs. One-line JSON logs are available as structured `jsonPayload` in Cloud Logging.
-- Cloud SQL and Cloud Run should use the same selected region unless a documented reason says otherwise.
-- Billing-export data has a delay and must always display freshness/cadence when used later.
-- GCP recommendations and cost actions are advisory; the project must never automate resource changes.
-
-## GCP deployment gate
-
-Do not begin dashboard implementation until all of these are true:
-
-- [ ] StaySync runs from Cloud Run.
-- [ ] Cloud SQL persists StaySync domain data.
-- [ ] Database credential comes from Secret Manager.
-- [ ] Pub/Sub delivers a booking-confirmation event to a worker.
-- [ ] Controlled scenarios are visible in Cloud Logging using event names and request IDs.
-- [ ] Generated load appears in Cloud Monitoring for Cloud Run/Cloud SQL (and Pub/Sub where applicable).
-- [ ] Logs have been checked for absence of PII, secrets, and payment data.
-- [ ] GCP project, region, budget, IAM roles, and billing-export availability are confirmed.
-
-## Dashboard requirements after the gate
-
-The later dashboard should be built only from verified StaySync/GCP inputs. It should help an operations user see:
-
-- Overall booking/operations health and current most-important issue.
-- Error count and error types by component and route.
-- Payment failures, availability/database errors, latency, confirmation retries, and traffic bursts.
-- Drill-down from summary to raw Cloud Logging evidence while preserving time/component context.
-- Cloud Run/Cloud SQL/Pub/Sub resource context alongside the incident window.
-- Cost information with explicit billing-data freshness and evidence-based advisory recommendations.
-
-It must not claim a root cause from correlation alone, and it must not present billing data as real-time.
-
-## Design decisions
-
-- The source UI is a guest/staff hospitality product, not a monitoring UI.
-- The visual direction is editorial hospitality: Cypress Ink, Limestone Canvas, Moss Accent, accessible contrast, responsive layout, and no neon/AI-dashboard aesthetic.
-- The Demo Lab is intentionally labelled development/demo only and separated from the normal guest journey.
-- Artificial failures are explicit, safe scenario modes—not hidden defects.
-
-## Project hygiene and location
-
-- Current live project: `E:\StaySync`.
-- Seven current documents are in `E:\StaySync\docs`.
-- Superseded CommerceOps project, old duplicate StaySync folder, old outputs folder, and temporary work folder were removed from the original generated workspace and sent to the Windows Recycle Bin.
-- The retained project is a Git repository.
-
-## Relevant Git history
-
-| Commit | Meaning |
-|---|---|
-| `52e7afb` | Initial StaySync booking demo foundation. |
-| `7a01727` | Visible payment-failure scenario. |
-| `d504bdd` | Scenario lab and additional product sections. |
-| `063d460` | Current seven StaySync project documents. |
-
-## Immediate next work
-
-1. Add the PostgreSQL/Cloud SQL repository and migration/schema from `docs/BACKEND_SCHEMA.md`.
-2. Add durable outbox publishing and a separate confirmation worker with idempotent Pub/Sub handling.
-3. Add Cloud Run/Secret Manager/Pub/Sub deployment assets and an environment template.
-4. Deploy only after the user provides/approves GCP project, region, budget, and access context.
-5. Run and verify every listed scenario in Cloud Logging and Cloud Monitoring.
-6. Start the monitoring dashboard only after the deployment gate passes.
-
-## Do not forget
-
-- Build one small feature at a time.
-- UI before cloud wiring for each source-product feature.
-- Tests early, not at the end.
-- Fundamentals before abstractions.
-- Keep scope hackathon-focused; do not add marketing/product-growth work.
+### Stage 2: Central Observability & Cost Optimization Platform (Final Deliverable)
+1. **Log Analytics Engine**: Connect to Cloud Logging API; display log streams, filter by severity, component, endpoint; compute error rate trends.
+2. **Alert Engine**: Configurable thresholds (error rate > 5%, consecutive 5xx spikes, latency > 500ms).
+3. **Resource Metrics Aggregator**: Query Cloud Monitoring API for Cloud Run CPU/Memory, concurrency, and Cloud SQL connection counts.
+4. **Cost Analytics Dashboard**: Ingest BigQuery Cloud Billing export; display daily/monthly spend and SKU breakdowns.
+5. **Advisory Cost Optimization Engine**: Detect underutilized resources (idle Cloud SQL instances, over-provisioned memory) and display actionable savings estimates.

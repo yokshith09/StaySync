@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>StaySync | Fulfilment desk</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <section class="page-head">
+      <div>
+        <p class="kicker">For the operations team</p>
+        <h2>Fulfilment desk</h2>
+      </div>
+      <button class="btn-quiet" id="refresh">Refresh</button>
+    </section>
+
+    <div id="locked" hidden>
+      <div class="empty" style="margin-top:40px">
+        <p>Staff credentials are required to open the fulfilment desk.</p>
+        <p class="meta" style="margin-top:12px">Sign in as Alex Vance to review orders and adjust stock.</p>
+        <a class="btn btn-accent" style="margin-top:20px" href="/signin?next=/operations">Sign in as staff</a>
+      </div>
+    </div>
+
+    <div id="desk" hidden>
+      <p class="notice" id="feedback"></p>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <p class="kicker">Queue</p>
+            <h3>Orders awaiting action</h3>
+          </div>
+          <span class="meta" id="order-count"></span>
+        </div>
+        <div id="orders" aria-live="polite"></div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <p class="kicker">Inventory</p>
+            <h3>Stock and availability</h3>
+          </div>
+          <span class="meta">Setting stock to zero marks a product unavailable</span>
+        </div>
+        <div id="inventory" aria-live="polite"></div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module">
+    import { api, money, esc, badge, mountChrome, notice, toast, thumb } from "/shared.js";
+
+    const user = await mountChrome("operations");
+    const locked = document.querySelector("#locked");
+    const desk = document.querySelector("#desk");
+
+    if (user?.role !== "staff") {
+      locked.hidden = false;
+    } else {
+      desk.hidden = false;
+      await Promise.all([loadOrders(), loadInventory()]);
+    }
+
+    function orderRow(order) {
+      const units = order.items.reduce((sum, i) => sum + i.quantity, 0);
+      const cancellable = order.status === "PENDING" || order.status === "PAID";
+      return `<div class="row">
+        <div class="row-main">
+          <p class="meta">${new Date(order.createdAt).toLocaleString()} · ${units} unit${units === 1 ? "" : "s"} · customer ${esc(order.userId)}</p>
+          <h3>Order ${esc(order.id.slice(0, 8).toUpperCase())}</h3>
+          <p class="meta">${order.items.map((i) => `${esc(i.product.name)} &times; ${i.quantity}`).join(" · ")}</p>
+        </div>
+        <div class="row-actions">
+          ${badge(order.status)}
+          <span class="line-total">${money(order.totalCents)}</span>
+          ${order.status === "PAID" ? `<button class="btn-accent btn-small" data-fulfil="${esc(order.id)}">Mark fulfilled</button>` : ""}
+          ${cancellable ? `<button class="btn-danger btn-small" data-cancel="${esc(order.id)}">Cancel</button>` : ""}
+        </div>
+      </div>`;
+    }
+
+    function inventoryRow(product) {
+      return `<div class="row">
+        <div class="row-main">
+          <p class="meta">${esc(product.category)} · ${esc(product.sku)}</p>
+          <h3>${esc(product.name)}</h3>
+          <p class="meta">${money(product.unitPriceCents)} per unit</p>
+        </div>
+        <div class="row-actions">
+          ${badge(product.status)}
+          <label style="margin:0">
+            <span class="meta">Stock</span>
+            <input type="number" min="0" max="9999" value="${product.stockQuantity}"
+              data-stock="${esc(product.id)}" style="width:92px;margin-top:4px">
+          </label>
+          <button class="btn-quiet btn-small" data-toggle="${esc(product.id)}"
+            data-next="${product.status === "ACTIVE" ? "OUT_OF_STOCK" : "ACTIVE"}">
+            ${product.status === "ACTIVE" ? "Mark unavailable" : "Mark available"}
+          </button>
+        </div>
+      </div>`;
+    }
+
+    async function loadOrders() {
+      const { ok, body, message } = await api("/api/orders");
+      if (!ok) return notice("#feedback", message ?? "Orders could not be loaded.", "error");
+      document.querySelector("#order-count").textContent = `${body.orders.length} total`;
+      document.querySelector("#orders").innerHTML = body.orders.length
+        ? `<div class="row-list">${body.orders.map(orderRow).join("")}</div>`
+        : `<div class="empty">No orders yet.</div>`;
+    }
+
+    async function loadInventory() {
+      const { ok, body, message } = await api("/api/products/all");
+      if (!ok) return notice("#feedback", message ?? "Inventory could not be loaded.", "error");
+      document.querySelector("#inventory").innerHTML =
+        `<div class="row-list">${body.products.map(inventoryRow).join("")}</div>`;
+    }
+
+    async function patchStock(productId, payload, successMessage) {
+      const { ok, message } = await api(`/api/products/${productId}/stock`, {
+        method: "PATCH",
+        body: JSON.stringify(payload)
+      });
+      if (!ok) return notice("#feedback", message ?? "The update failed.", "error");
+      notice("#feedback", "");
+      toast(successMessage);
+      await loadInventory();
+    }
+
+    document.querySelector("#orders").addEventListener("click", async (event) => {
+      const target = event.target.closest("[data-fulfil],[data-cancel]");
+      if (!target) return;
+      target.disabled = true;
+
+      const { fulfil, cancel } = target.dataset;
+      const result = fulfil
+        ? await api(`/api/orders/${fulfil}/fulfil`, { method: "PATCH" })
+        : await api(`/api/orders/${cancel}/cancel`, { method: "POST" });
+
+      target.disabled = false;
+      if (!result.ok) return notice("#feedback", result.message ?? "The action failed.", "error");
+      notice("#feedback", "");
+      toast(fulfil ? "Order marked fulfilled." : "Order cancelled and stock released.");
+      await Promise.all([loadOrders(), loadInventory()]);
+    });
+
+    const inventoryEl = document.querySelector("#inventory");
+
+    inventoryEl.addEventListener("click", async (event) => {
+      const toggle = event.target.closest("[data-toggle]");
+      if (!toggle) return;
+      await patchStock(toggle.dataset.toggle, { status: toggle.dataset.next }, "Availability updated.");
+    });
+
+    inventoryEl.addEventListener("change", async (event) => {
+      const input = event.target.closest("[data-stock]");
+      if (!input) return;
+      const stockQuantity = Number(input.value);
+      if (!Number.isInteger(stockQuantity) || stockQuantity < 0) {
+        return notice("#feedback", "Stock must be a whole number of zero or more.", "error");
+      }
+      // Restocking a sold-out product reopens it; zeroing it closes it.
+      await patchStock(
+        input.dataset.stock,
+        { stockQuantity, status: stockQuantity === 0 ? "OUT_OF_STOCK" : "ACTIVE" },
+        "Stock updated."
+      );
+    });
+
+    document.querySelector("#refresh").addEventListener("click", () =>
+      Promise.all([loadOrders(), loadInventory()])
+    );
+  </script>
+</body>
+</html>

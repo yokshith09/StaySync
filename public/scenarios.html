@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>StaySync | Scenario lab</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <section class="page-head">
+      <div>
+        <p class="kicker">Development and demo only</p>
+        <h2>Scenario lab</h2>
+      </div>
+      <button class="btn-quiet" id="clear">Clear output</button>
+    </section>
+
+    <p class="lede section">Each scenario drives the real API and produces one deterministic, named log event.
+      After deployment these are the entries the monitoring dashboard queries in Cloud Logging — by
+      <code>event</code> name, severity, and <code>requestId</code>.</p>
+
+    <div class="panel" id="session-panel" style="margin-bottom:28px">
+      <div class="section-head" style="margin:0">
+        <div>
+          <p class="kicker">Session</p>
+          <h3 id="session-state">Checking…</h3>
+          <p class="meta" id="session-hint"></p>
+        </div>
+        <a class="btn btn-accent" id="session-signin" href="/signin?next=/scenarios" hidden>Sign in</a>
+      </div>
+    </div>
+
+    <p class="notice" id="feedback"></p>
+
+    <section class="scenario-grid">
+      <article class="scenario-card">
+        <h3>Payment provider rejection</h3>
+        <p>Places a real order, then sends the payment with the failure header. The order stays pending and the failed attempt is audited.</p>
+        <code>payment_provider_rejected · ERROR · 502</code>
+        <button data-scenario="payment_failure">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Slow payment</h3>
+        <p>Payment succeeds but above the demo latency threshold, which is what a latency alert should catch.</p>
+        <code>payment_slow · WARNING · 201</code>
+        <button data-scenario="slow_payment">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Database timeout</h3>
+        <p>The catalogue call reports its dependency as unreachable.</p>
+        <code>database_timeout · ERROR · 503</code>
+        <button data-scenario="database_timeout">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Stock contention</h3>
+        <p>Fires concurrent orders for the same low-stock product. Row locking lets exactly the available quantity through and rejects the rest.</p>
+        <code>order_stock_conflict · WARNING · 409</code>
+        <button data-scenario="stock_conflict">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Failed sign-in</h3>
+        <p>A wrong password on a real account, which is the signal an auth-failure alert watches.</p>
+        <code>auth_login_failed · WARNING · 401</code>
+        <button data-scenario="auth_failed">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Unauthorized desk query</h3>
+        <p>A non-staff request against the fulfilment desk endpoint.</p>
+        <code>auth_unauthorized_access · WARNING · 403</code>
+        <button data-scenario="unauthorized_desk">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Traffic burst</h3>
+        <p>Twenty concurrent catalogue requests, to move Cloud Run CPU, concurrency and database connections.</p>
+        <code>product_catalog_listed &times; 20 · INFO · 200</code>
+        <button data-scenario="traffic_burst">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Idempotent replay</h3>
+        <p>Sends the same order twice with one Idempotency-Key. Exactly one order is created; the second call replays the stored response.</p>
+        <code>idempotent_replay · INFO · 201</code>
+        <button data-scenario="idempotent_replay">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Brute force sign-in</h3>
+        <p>Eight failed sign-ins against one address. The first five are plain rejections; after that the account is locked and refused before the database is touched.</p>
+        <code>auth_login_failed &times;5 then auth_rate_limited &times;3 · WARNING · 401 / 429</code>
+        <button data-scenario="brute_force">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Idempotency key conflict</h3>
+        <p>Reuses one Idempotency-Key with a different order body. The second request is refused rather than quietly creating a different order.</p>
+        <code>idempotency_key_conflict · WARNING · 422</code>
+        <button data-scenario="key_conflict">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Validation storm</h3>
+        <p>A burst of malformed order payloads — empty lists, zero quantities, missing ids. Drives the 4xx rate without any 5xx.</p>
+        <code>order_invalid · WARNING · 422</code>
+        <button data-scenario="validation_storm">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Route scanning</h3>
+        <p>Requests a series of paths that do not exist, the shape an automated scanner produces.</p>
+        <code>route_not_found · WARNING · 404</code>
+        <button data-scenario="route_scan">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Order churn</h3>
+        <p>Places and immediately cancels five orders. Stock returns to where it started and ten outbox events are staged for the worker.</p>
+        <code>order_created / order_cancelled · INFO · 201 / 200</code>
+        <button data-scenario="order_churn">Run</button>
+      </article>
+
+      <article class="scenario-card">
+        <h3>Mixed baseline load</h3>
+        <p>Blended realistic traffic — browsing, searching, a couple of orders and one failure. Use it to establish a normal baseline before triggering an anomaly.</p>
+        <code>mixed severities · INFO / WARNING / ERROR</code>
+        <button data-scenario="mixed_load">Run</button>
+      </article>
+    </section>
+
+    <pre class="log-output" id="output" aria-live="polite"></pre>
+  </main>
+
+  <script type="module">
+    import { api, esc, mountChrome, notice } from "/shared.js";
+
+    const user = await mountChrome("scenarios");
+    const output = document.querySelector("#output");
+    const sessionState = document.querySelector("#session-state");
+    const sessionHint = document.querySelector("#session-hint");
+    const sessionSignIn = document.querySelector("#session-signin");
+
+    // The lab holds no credentials and performs no sign-in of its own. Scenarios
+    // that place real orders run as whoever is actually signed in, or not at all.
+    if (user) {
+      sessionState.textContent = `${user.name} · ${user.role}`;
+      sessionHint.textContent = "Order scenarios will run against this account.";
+    } else {
+      sessionState.textContent = "Not signed in";
+      sessionHint.textContent = "Scenarios that place real orders need you to sign in first.";
+      sessionSignIn.hidden = false;
+    }
+
+    function log(line) {
+      output.textContent += `${new Date().toLocaleTimeString()}  ${line}\n`;
+      output.scrollTop = output.scrollHeight;
+    }
+
+    const summarise = ({ response, body }) =>
+      body?.error
+        ? `HTTP ${response.status}  ${body.error.code}: ${body.error.message}`
+        : `HTTP ${response.status}  ok`;
+
+    /** Orders need a real pending order to pay for; this creates one from the cheapest in-stock product. */
+    async function createPendingOrder() {
+      const { ok, body } = await api("/api/products");
+      if (!ok) return null;
+      const product = body.products.find((p) => p.stockQuantity > 0);
+      if (!product) return null;
+      const result = await api("/api/orders", {
+        method: "POST",
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify({ items: [{ productId: product.id, quantity: 1 }] })
+      });
+      return result.ok ? result.body.order : null;
+    }
+
+    const scenarios = {
+      async payment_failure() {
+        const order = await createPendingOrder();
+        if (!order) return log("Could not create an order to pay for.");
+        log(`Created order ${order.id.slice(0, 8).toUpperCase()} (order_created · INFO · 201)`);
+        const result = await api("/api/payments", {
+          method: "POST",
+          headers: { "x-demo-scenario": "payment_failure" },
+          body: JSON.stringify({ orderId: order.id })
+        });
+        log(`${summarise(result)}  -> payment_provider_rejected · ERROR`);
+      },
+
+      async slow_payment() {
+        const order = await createPendingOrder();
+        if (!order) return log("Could not create an order to pay for.");
+        const started = performance.now();
+        const result = await api("/api/payments", {
+          method: "POST",
+          headers: { "x-demo-scenario": "slow_payment" },
+          body: JSON.stringify({ orderId: order.id })
+        });
+        log(`${summarise(result)} in ${Math.round(performance.now() - started)}ms  -> payment_slow · WARNING`);
+      },
+
+      async database_timeout() {
+        const result = await api("/api/products", { headers: { "x-demo-scenario": "database_timeout" } });
+        log(`${summarise(result)}  -> database_timeout · ERROR`);
+      },
+
+      async stock_conflict() {
+        const { ok, body } = await api("/api/products");
+        if (!ok) return log("Catalogue unavailable.");
+        const target = body.products
+          .filter((p) => p.stockQuantity > 0)
+          .sort((a, b) => a.stockQuantity - b.stockQuantity)[0];
+        if (!target) return log("No product with stock to contend over.");
+
+        const attempts = target.stockQuantity + 3;
+        log(`Firing ${attempts} concurrent orders for ${target.name} (stock ${target.stockQuantity})`);
+        const results = await Promise.all(
+          Array.from({ length: attempts }, () =>
+            api("/api/orders", {
+              method: "POST",
+              headers: { "idempotency-key": crypto.randomUUID() },
+              body: JSON.stringify({ items: [{ productId: target.id, quantity: 1 }] })
+            })
+          )
+        );
+        const created = results.filter((r) => r.response.status === 201).length;
+        const rejected = results.filter((r) => r.response.status === 409).length;
+        log(`${created} created · ${rejected} rejected with 409  -> order_stock_conflict · WARNING`);
+        log(created <= target.stockQuantity ? "Stock was never oversold." : "WARNING: stock was oversold.");
+      },
+
+      async auth_failed() {
+        const result = await api("/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ email: "staff@staysync.internal", password: "WrongPassword123!" })
+        });
+        log(`${summarise(result)}  -> auth_login_failed · WARNING`);
+      },
+
+      async unauthorized_desk() {
+        const result = await api("/api/orders", { headers: { "x-demo-scenario": "unauthorized_desk" } });
+        log(`${summarise(result)}  -> auth_unauthorized_access · WARNING`);
+      },
+
+      async traffic_burst() {
+        const started = performance.now();
+        const results = await Promise.all(
+          Array.from({ length: 20 }, () => api("/api/products", { headers: { "x-demo-scenario": "traffic_burst" } }))
+        );
+        const ok = results.filter((r) => r.ok).length;
+        log(`${ok}/20 catalogue requests returned 200 in ${Math.round(performance.now() - started)}ms`);
+        log("Check Cloud Run CPU, concurrency and database connections in Cloud Monitoring.");
+      },
+
+
+      async brute_force() {
+        // A throwaway address, so the seeded demo account is never locked out.
+        const target = `bruteforce.${Date.now()}@example.com`;
+        let rejected = 0;
+        let locked = 0;
+        for (let i = 0; i < 8; i += 1) {
+          const result = await api("/api/auth/login", {
+            method: "POST",
+            body: JSON.stringify({ email: target, password: `Guess${i}!` })
+          });
+          if (result.response.status === 401) rejected += 1;
+          if (result.response.status === 429) locked += 1;
+        }
+        log(`${rejected} rejected with 401, then ${locked} refused with 429  -> auth_rate_limited · WARNING`);
+        log(locked > 0 ? "Lockout engaged before the store was consulted." : "WARNING: no lockout engaged.");
+      },
+
+      async key_conflict() {
+        const { ok, body } = await api("/api/products");
+        if (!ok) return log("Catalogue unavailable.");
+        const [a, b] = body.products.filter((p) => p.stockQuantity > 1);
+        if (!a || !b) return log("Need two products with spare stock.");
+
+        const key = crypto.randomUUID();
+        const first = await api("/api/orders", {
+          method: "POST",
+          headers: { "idempotency-key": key },
+          body: JSON.stringify({ items: [{ productId: a.id, quantity: 1 }] })
+        });
+        const second = await api("/api/orders", {
+          method: "POST",
+          headers: { "idempotency-key": key },
+          body: JSON.stringify({ items: [{ productId: b.id, quantity: 1 }] })
+        });
+        log(`First  ${summarise(first)}`);
+        log(`Second ${summarise(second)}  -> idempotency_key_conflict · WARNING`);
+        log(second.response.status === 422 ? "Key reuse refused, as intended." : "WARNING: the reuse was not refused.");
+      },
+
+      async validation_storm() {
+        const payloads = [
+          { items: [] },
+          { items: [{ productId: "prod-merino-crew", quantity: 0 }] },
+          { items: [{ quantity: 3 }] },
+          { items: [{ productId: "prod-merino-crew", quantity: 500 }] },
+          { items: "not-a-list" },
+          {}
+        ];
+        const results = await Promise.all(
+          payloads.map((body) => api("/api/orders", { method: "POST", body: JSON.stringify(body) }))
+        );
+        const counts = results.reduce((acc, r) => ({ ...acc, [r.response.status]: (acc[r.response.status] ?? 0) + 1 }), {});
+        log(`${payloads.length} malformed orders -> ${JSON.stringify(counts)}  -> order_invalid · WARNING`);
+        log(results.every((r) => r.response.status < 500) ? "No malformed payload reached a 5xx." : "WARNING: a 5xx escaped.");
+      },
+
+      async route_scan() {
+        const paths = ["/api/admin", "/api/users", "/.env", "/api/orders/../../etc", "/wp-login.php"];
+        const results = await Promise.all(paths.map((p) => api(p)));
+        const notFound = results.filter((r) => r.response.status === 404).length;
+        log(`${notFound}/${paths.length} unknown paths returned 404  -> route_not_found · WARNING`);
+        log(results.some((r) => r.response.status === 200) ? "WARNING: a probe path returned 200." : "No probe path was served.");
+      },
+
+      async order_churn() {
+        const { ok, body } = await api("/api/products");
+        if (!ok) return log("Catalogue unavailable.");
+        const product = body.products.find((p) => p.stockQuantity > 5);
+        if (!product) return log("Need a product with spare stock.");
+        const before = product.stockQuantity;
+
+        for (let i = 0; i < 5; i += 1) {
+          const created = await api("/api/orders", {
+            method: "POST",
+            headers: { "idempotency-key": crypto.randomUUID() },
+            body: JSON.stringify({ items: [{ productId: product.id, quantity: 1 }] })
+          });
+          if (created.ok) await api(`/api/orders/${created.body.order.id}/cancel`, { method: "POST" });
+        }
+
+        const after = (await api("/api/products")).body.products.find((p) => p.id === product.id)?.stockQuantity;
+        log(`5 orders placed and cancelled; stock ${before} -> ${after}  -> 10 outbox events staged`);
+        log(before === after ? "Stock returned exactly to where it started." : "WARNING: stock drifted.");
+      },
+
+      async mixed_load() {
+        const started = performance.now();
+        const work = [
+          ...Array.from({ length: 8 }, () => api("/api/products")),
+          api("/api/products?q=wool"),
+          api("/api/products?category=Knitwear"),
+          api("/api/categories"),
+          api("/api/orders/my"),
+          api("/health"),
+          api("/api/auth/login", {
+            method: "POST",
+            body: JSON.stringify({ email: "customer@staysync.internal", password: "definitely-wrong" })
+          }),
+          api("/api/products", { headers: { "x-demo-scenario": "database_timeout" } })
+        ];
+        const results = await Promise.all(work);
+        const counts = results.reduce((acc, r) => ({ ...acc, [r.response.status]: (acc[r.response.status] ?? 0) + 1 }), {});
+        log(`${results.length} blended requests in ${Math.round(performance.now() - started)}ms -> ${JSON.stringify(counts)}`);
+        log("A mixed INFO/WARNING/ERROR baseline for anomaly detection.");
+      },
+
+      async idempotent_replay() {
+        const { ok, body } = await api("/api/products");
+        if (!ok) return log("Catalogue unavailable.");
+        const product = body.products.find((p) => p.stockQuantity > 1);
+        if (!product) return log("No product with spare stock.");
+
+        const key = crypto.randomUUID();
+        const payload = JSON.stringify({ items: [{ productId: product.id, quantity: 1 }] });
+        const first = await api("/api/orders", { method: "POST", headers: { "idempotency-key": key }, body: payload });
+        const second = await api("/api/orders", { method: "POST", headers: { "idempotency-key": key }, body: payload });
+
+        log(`First  ${summarise(first)}`);
+        log(`Second ${summarise(second)}  -> idempotent_replay · INFO`);
+        log(
+          first.body?.order?.id && first.body.order.id === second.body?.order?.id
+            ? "Same order id returned twice: no duplicate order was created."
+            : "WARNING: the two calls produced different orders."
+        );
+      }
+    };
+
+    document.querySelector(".scenario-grid").addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-scenario]");
+      if (!button) return;
+      const name = button.dataset.scenario;
+
+      const needsSession = ["payment_failure", "slow_payment", "stock_conflict", "idempotent_replay",
+                            "key_conflict", "validation_storm", "order_churn"];
+      if (needsSession.includes(name) && !user) {
+        return notice(
+          "#feedback",
+          "This scenario places a real order, so it needs a signed-in account. Sign in first.",
+          "error"
+        );
+      }
+
+      notice("#feedback", "");
+      button.disabled = true;
+      log(`--- ${name} ---`);
+      try {
+        await scenarios[name]();
+      } catch (err) {
+        log(`Scenario error: ${err.message}`);
+      }
+      button.disabled = false;
+    });
+
+    document.querySelector("#clear").addEventListener("click", () => {
+      output.textContent = "";
+    });
+  </script>
+</body>
+</html>
